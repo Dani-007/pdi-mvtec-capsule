@@ -1,0 +1,50 @@
+132 imagens de teste carregadas
+
+=== 1. Fração do GT dentro da ROI x erosão ===
+erosão  0px: média=0.954  mínimo=0.058
+erosão  5px: média=0.943  mínimo=0.010
+erosão  9px: média=0.934  mínimo=0.000
+erosão 15px: média=0.918  mínimo=0.000
+erosão 21px: média=0.902  mínimo=0.000
+erosão 31px: média=0.866  mínimo=0.000
+
+=== 2. Bordas + abertura (dice por tipo é baixo por natureza: borda x região) ===
+Canny 25/60 | abertura 0     hit=0.50  FP_boa=   1777  FP_def=   1441  prec=0.080  crack=0.04 faulty=0.01 poke=0.05 scratc=0.00 squeez=0.02
+Canny 25/60 | abertura 3     hit=0.17  FP_boa=    129  FP_def=    101  prec=0.205  crack=0.03 faulty=0.00 poke=0.02 scratc=0.00 squeez=0.00
+Canny 25/60 | abertura 5     hit=0.08  FP_boa=     62  FP_def=     44  prec=0.205  crack=0.01 faulty=0.00 poke=0.01 scratc=0.00 squeez=0.00
+Canny 25/60 | abertura 7     hit=0.05  FP_boa=     17  FP_def=     13  prec=0.192  crack=0.00 faulty=0.00 poke=0.00 scratc=0.00 squeez=0.00
+Canny 25/60 | abertura 9     hit=0.00  FP_boa=      0  FP_def=      0  prec=0.000  crack=0.00 faulty=0.00 poke=0.00 scratc=0.00 squeez=0.00
+Canny 15/40 | abertura 0     hit=0.72  FP_boa=   2476  FP_def=   2258  prec=0.092  crack=0.06 faulty=0.05 poke=0.07 scratc=0.01 squeez=0.02
+Canny 15/40 | abertura 3     hit=0.42  FP_boa=    247  FP_def=    222  prec=0.237  crack=0.05 faulty=0.05 poke=0.05 scratc=0.00 squeez=0.00
+Canny 15/40 | abertura 5     hit=0.22  FP_boa=    114  FP_def=     98  prec=0.252  crack=0.02 faulty=0.03 poke=0.02 scratc=0.00 squeez=0.00
+Canny 15/40 | abertura 7     hit=0.12  FP_boa=     31  FP_def=     28  prec=0.293  crack=0.00 faulty=0.02 poke=0.01 scratc=0.00 squeez=0.00
+Canny 15/40 | abertura 9     hit=0.02  FP_boa=      0  FP_def=      2  prec=0.695  crack=0.00 faulty=0.01 poke=0.00 scratc=0.00 squeez=0.00
+Canny 10/25 | abertura 0     hit=0.89  FP_boa=   2627  FP_def=   2406  prec=0.119  crack=0.08 faulty=0.09 poke=0.11 scratc=0.03 squeez=0.03
+Canny 10/25 | abertura 3     hit=0.72  FP_boa=    368  FP_def=    370  prec=0.291  crack=0.08 faulty=0.12 poke=0.11 scratc=0.02 squeez=0.00
+Canny 10/25 | abertura 5     hit=0.48  FP_boa=    152  FP_def=    163  prec=0.322  crack=0.05 faulty=0.08 poke=0.05 scratc=0.01 squeez=0.00
+Canny 10/25 | abertura 7     hit=0.28  FP_boa=     44  FP_def=     52  prec=0.379  crack=0.02 faulty=0.04 poke=0.02 scratc=0.00 squeez=0.00
+Canny 10/25 | abertura 9     hit=0.06  FP_boa=      0  FP_def=      6  prec=0.641  crack=0.01 faulty=0.03 poke=0.00 scratc=0.00 squeez=0.00
+Sobel |G|>40 | abertura 0    hit=0.69  FP_boa=   9061  FP_def=   7987  prec=0.068  crack=0.07 faulty=0.01 poke=0.06 scratc=0.01 squeez=0.07
+Sobel |G|>40 | abertura 3    hit=0.55  FP_boa=   8057  FP_def=   6938  prec=0.070  crack=0.07 faulty=0.01 poke=0.06 scratc=0.00 squeez=0.06
+Sobel |G|>40 | abertura 5    hit=0.39  FP_boa=   3445  FP_def=   2942  prec=0.096  crack=0.08 faulty=0.00 poke=0.06 scratc=0.00 squeez=0.05
+Sobel |G|>40 | abertura 7    hit=0.22  FP_boa=   1653  FP_def=   1504  prec=0.108  crack=0.05 faulty=0.00 poke=0.05 scratc=0.00 squeez=0.03
+Sobel |G|>40 | abertura 9    hit=0.13  FP_boa=    117  FP_def=    114  prec=0.377  crack=0.03 faulty=0.00 poke=0.04 scratc=0.00 squeez=0.01
+Sobel |G|>60 | abertura 0    hit=0.38  FP_boa=   2573  FP_def=   2173  prec=0.090  crack=0.06 faulty=0.00 poke=0.04 scratc=0.00 squeez=0.04
+Sobel |G|>60 | abertura 3    hit=0.30  FP_boa=   1909  FP_def=   1588  prec=0.101  crack=0.06 faulty=0.00 poke=0.04 scratc=0.00 squeez=0.03
+Sobel |G|>60 | abertura 5    hit=0.17  FP_boa=    519  FP_def=    523  prec=0.155  crack=0.04 faulty=0.00 poke=0.03 scratc=0.00 squeez=0.02
+Sobel |G|>60 | abertura 7    hit=0.08  FP_boa=      0  FP_def=      1  prec=0.966  crack=0.02 faulty=0.00 poke=0.02 scratc=0.00 squeez=0.00
+Sobel |G|>60 | abertura 9    hit=0.03  FP_boa=      0  FP_def=      0  prec=0.997  crack=0.00 faulty=0.00 poke=0.01 scratc=0.00 squeez=0.00
+
+=== 3. Golden template (referência mais próxima) ===
+limiar 20 | abertura 0       hit=0.85  FP_boa=   7131  FP_def=   8563  prec=0.234  crack=0.20 faulty=0.16 poke=0.19 scratc=0.02 squeez=0.26
+limiar 20 | abertura 3       hit=0.84  FP_boa=   6912  FP_def=   8364  prec=0.237  crack=0.21 faulty=0.16 poke=0.19 scratc=0.02 squeez=0.26
+limiar 20 | abertura 5       hit=0.83  FP_boa=   6168  FP_def=   7652  prec=0.250  crack=0.21 faulty=0.17 poke=0.20 scratc=0.01 squeez=0.27
+limiar 25 | abertura 0       hit=0.76  FP_boa=   4945  FP_def=   6211  prec=0.252  crack=0.20 faulty=0.12 poke=0.18 scratc=0.01 squeez=0.25
+limiar 25 | abertura 3       hit=0.76  FP_boa=   4808  FP_def=   6049  prec=0.257  crack=0.20 faulty=0.12 poke=0.18 scratc=0.01 squeez=0.25
+limiar 25 | abertura 5       hit=0.72  FP_boa=   4177  FP_def=   5530  prec=0.271  crack=0.21 faulty=0.12 poke=0.18 scratc=0.01 squeez=0.25
+limiar 30 | abertura 0       hit=0.67  FP_boa=   3326  FP_def=   4428  prec=0.284  crack=0.20 faulty=0.07 poke=0.16 scratc=0.00 squeez=0.24
+limiar 30 | abertura 3       hit=0.67  FP_boa=   3186  FP_def=   4311  prec=0.289  crack=0.20 faulty=0.07 poke=0.16 scratc=0.00 squeez=0.24
+limiar 30 | abertura 5       hit=0.63  FP_boa=   2792  FP_def=   3907  prec=0.306  crack=0.21 faulty=0.07 poke=0.16 scratc=0.00 squeez=0.25
+limiar 40 | abertura 0       hit=0.45  FP_boa=   1210  FP_def=   1939  prec=0.393  crack=0.21 faulty=0.00 poke=0.13 scratc=0.00 squeez=0.24
+limiar 40 | abertura 3       hit=0.44  FP_boa=   1169  FP_def=   1880  prec=0.400  crack=0.21 faulty=0.00 poke=0.13 scratc=0.00 squeez=0.24
+limiar 40 | abertura 5       hit=0.42  FP_boa=   1029  FP_def=   1677  prec=0.424  crack=0.21 faulty=0.00 poke=0.12 scratc=0.00 squeez=0.24
