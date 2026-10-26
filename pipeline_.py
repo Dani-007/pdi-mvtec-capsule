@@ -1,5 +1,5 @@
 """
-Projeto 4 (PDI - UFSCar) - Etapa 1: Localização do objeto/defeito
+Projeto 4 (PDI - UFSCar): Localização do objeto/defeito
 Categoria MVTec AD: capsule
 
 Pipeline clássico (sem Deep Learning):
@@ -10,9 +10,9 @@ Pipeline clássico (sem Deep Learning):
                           mais parecida, alinhada por ECC)
 
 Uso:
-    python pipeline_etapa1.py                                  # exemplo padrão (scratch/000)
-    python pipeline_etapa1.py --defeito crack --indice 0
-    python pipeline_etapa1.py --defeito good  --indice 3 --salvar saida.png
+    python pipeline.py                                  # exemplo padrão (scratch/000)
+    python pipeline.py --defeito crack --indice 0
+    python pipeline.py --defeito good  --indice 3 --salvar saida.png
 
 Convenções:
     - Imagens BGR (padrão OpenCV) só na leitura; o resto do pipeline trabalha em tons de cinza uint8.
@@ -36,7 +36,7 @@ import numpy as np
 #   - fundo ~200 | metade laranja ~85-95 | metade preta ~20-40
 #   - texto "500" sobre o laranja: ~86 -> ~121 (só ~35 níveis), transição de 6-8 px
 #   - arranhões na metade laranja: poucos níveis de cinza (defeito mais difícil)
-# Os números entre colchetes nos comentários vêm de avaliar_etapa1.py, rodado nas
+# Os números entre colchetes nos comentários vêm de avaliar.py, rodado nas
 # 132 imagens de test/ (109 defeituosas + 23 boas).
 
 DATASET_DIR = Path(__file__).resolve().parent / "capsule"
@@ -546,7 +546,7 @@ def executar_golden(img_bgr: np.ndarray, banco: list[dict],
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Etapa 1 - localização de defeitos (capsule)")
+    parser = argparse.ArgumentParser(description="Localização de defeitos (capsule)")
     parser.add_argument("--defeito", default="scratch",
                         choices=["good", "crack", "faulty_imprint", "poke", "scratch", "squeeze"])
     parser.add_argument("--indice", type=int, default=0)

@@ -1,7 +1,7 @@
 """
-Avaliação quantitativa da Etapa 1 sobre todo o test/ de capsule.
+Avaliação quantitativa sobre todo o test/ de capsule.
 
-Gera as tabelas usadas para justificar os parâmetros de pipeline_etapa1.py:
+Gera as tabelas usadas para justificar os parâmetros de pipeline.py:
     1. Quanto do GT sobrevive a cada erosão da ROI.
     2. Bordas (Canny/Sobel) x tamanho da abertura: falsos positivos vs. detecção.
     3. Golden template x limiar x abertura: Dice/precisão por tipo de defeito.
@@ -12,13 +12,13 @@ Métricas:
     FP_def   média de pixels marcados FORA do GT nas imagens defeituosas
     prec     precisão pixel a pixel global (soma TP / soma marcados) nas defeituosas
 
-Uso:  python avaliar_etapa1.py   (~3 min; o golden template domina o tempo)
+Uso:  python avaliar.py   (~3 min; o golden template domina o tempo)
 """
 
 import numpy as np
 import cv2
 
-from pipeline_etapa1 import (
+from pipeline import (
     DATASET_DIR, GOLDEN_N_BANCO, MORF_FECHAMENTO_PREVIO,
     aplicar_abertura, carregar_banco_referencias, carregar_imagem, carregar_mascara_gt,
     converter_cinza, detectar_bordas_canny, detectar_bordas_sobel, filtro_bilateral,
