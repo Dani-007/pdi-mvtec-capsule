@@ -12,7 +12,7 @@ Métricas:
     FP_def   média de pixels marcados FORA do GT nas imagens defeituosas
     prec     precisão pixel a pixel global (soma TP / soma marcados) nas defeituosas
 
-Uso:  python avaliar.py   (~3 min; o golden template domina o tempo)
+Uso:  python src/avaliar.py   (~3 min; o golden template domina o tempo)
 """
 
 import numpy as np

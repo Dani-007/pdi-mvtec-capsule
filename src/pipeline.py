@@ -10,9 +10,9 @@ Pipeline clássico (sem Deep Learning):
                           mais parecida, alinhada por ECC)
 
 Uso:
-    python pipeline.py                                  # exemplo padrão (scratch/000)
-    python pipeline.py --defeito crack --indice 0
-    python pipeline.py --defeito good  --indice 3 --salvar saida.png
+    python src/pipeline.py                                  # exemplo padrão (scratch/000)
+    python src/pipeline.py --defeito crack --indice 0
+    python src/pipeline.py --defeito good  --indice 3 --salvar saida.png
 
 Convenções:
     - Imagens BGR (padrão OpenCV) só na leitura; o resto do pipeline trabalha em tons de cinza uint8.
@@ -39,7 +39,8 @@ import numpy as np
 # Os números entre colchetes nos comentários vêm de avaliar.py, rodado nas
 # 132 imagens de test/ (109 defeituosas + 23 boas).
 
-DATASET_DIR = Path(__file__).resolve().parent / "capsule"
+RAIZ = Path(__file__).resolve().parent.parent   # raiz do repositório (este arquivo está em src/)
+DATASET_DIR = RAIZ / "capsule"
 
 # --- Filtro bilateral ---------------------------------------------------------
 # d = 9: vizinhança de 9x9 px. Cobre o grão do ruído do sensor e a textura fina

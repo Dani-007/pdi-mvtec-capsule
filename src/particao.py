@@ -17,7 +17,7 @@ para calibrar o limiar), então a Etapa 1 continua válida.
 Os folds são sorteados com semente fixa e estratificados por tipo (good, crack,
 faulty_imprint, poke, scratch, squeeze): cada fold tem ~1/5 de cada tipo.
 
-Uso:  python particao.py   -> gera dados/particao.csv e imprime o resumo
+Uso:  python src/particao.py   -> gera dados/particao.csv e imprime o resumo
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ N_CALIBRACAO = 20
 N_FOLDS = 5
 SEMENTE = 42
 TIPOS_DEFEITO = ["crack", "faulty_imprint", "poke", "scratch", "squeeze"]
-SAIDA = Path(__file__).resolve().parent / "dados" / "particao.csv"
+SAIDA = Path(__file__).resolve().parent.parent / "dados" / "particao.csv"
 
 
 def montar_particao() -> list[dict]:

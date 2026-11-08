@@ -23,7 +23,7 @@ Saídas:
     dados/gerado/mascaras/<pasta>_<tipo>_<id>.png máscara final (C4), usada na Etapa 4
     dados/gerado/cache_golden.npz                 diferenças já calculadas (cache)
 
-Uso:  python segmentacao.py          (~10 min na primeira vez; depois usa o cache)
+Uso:  python src/segmentacao.py          (~10 min na primeira vez; depois usa o cache)
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from pipeline import (
     selecionar_referencia,
 )
 
-RAIZ = Path(__file__).resolve().parent
+RAIZ = Path(__file__).resolve().parent.parent   # raiz do repositório (este arquivo está em src/)
 GERADO = RAIZ / "dados" / "gerado"
 CACHE = GERADO / "cache_golden.npz"
 DIR_MASCARAS = GERADO / "mascaras"

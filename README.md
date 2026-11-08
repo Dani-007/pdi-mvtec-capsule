@@ -10,7 +10,7 @@ Disciplina de Processamento Digital de Imagens — UFSCar · Prof. Dr. Ricardo J
 1. [Contexto e objetivo](#1-contexto-e-objetivo)
 2. [Dados e escopo](#2-dados-e-escopo)
 3. [Andamento](#3-andamento)
-4. [Pipeline da Etapa 1 — localização do defeito](#4-pipeline-da-etapa-1--localização-do-defeito)
+4. [Pipeline — localização do defeito (Etapas 1–3)](#4-pipeline--localização-do-defeito-etapas-13)
 5. [Avaliação](#5-avaliação)
 6. [Resultados](#6-resultados)
 7. [Discussão e limitações](#7-discussão-e-limitações)
@@ -67,11 +67,11 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 | Etapa | Descrição | Situação |
 |---|---|---|
 | **1** | Localização do defeito: duas estratégias comparadas | ✅ concluída |
-| **2** | Partição própria (`particao.py`) | ✅ concluída |
-| **3** | Máscara final: golden template + morfologia completa (`segmentacao.py`) | ✅ concluída |
+| **2** | Partição própria (`src/particao.py`) | ✅ concluída |
+| **3** | Máscara final: golden template + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
 | **4–6** | Atributos, classificação e resultados | ⏳ próximos passos |
 
-## 4. Pipeline da Etapa 1 — localização do defeito
+## 4. Pipeline — localização do defeito (Etapas 1–3)
 
 ### 4.1 Pré-processamento
 | Passo | Técnica | Justificativa |
@@ -109,10 +109,36 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 6. **Abertura 5×5:** remove fragmentos de 1–3 px causados pelo erro residual de alinhamento, mais
    finos que os defeitos.
 
+### 4.5 Etapa 2 — partição própria (`src/particao.py` → `dados/particao.csv`)
+Cada imagem recebe um papel fixo, para que nenhum parâmetro seja escolhido olhando as imagens que
+dão a nota final:
+
+| Conjunto | Imagens | Uso |
+|---|---|---|
+| `banco` | 30 normais (`train/good` 000–029) | referências do golden template (as mesmas da Etapa 1) |
+| `calibracao` | 20 normais (`train/good` 030–049) | calibrar limiares e tamanhos usando só a variação normal |
+| `classificacao` | 169 + 23 normais e 109 defeituosas | avaliação da segmentação; atributos e classificação com validação cruzada em **5 folds** estratificados por tipo (semente 42) |
+
+### 4.6 Etapa 3 — máscara final (`src/segmentacao.py`)
+Golden template da Etapa 1 seguido de morfologia completa, aplicada de forma cumulativa para medir o
+efeito de cada operação:
+
+| Passo | Operação | Objetivo |
+|---|---|---|
+| C0 | \|teste − ref\| > T, com T = p99 da diferença nas 20 boas de calibração (= 32) | marcação inicial |
+| C1 | abertura 5×5 | remover fragmentos finos (= Etapa 1) |
+| C2 | ROI erodida 9 px | excluir o contorno da cápsula |
+| C3 | fechamento 5×5 | unir pedaços do mesmo defeito |
+| C4 | preenchimento de buracos (*flood fill*) | manchas sólidas |
+| C5 | remoção de componentes conexos < A_MIN, com A_MIN = p95 da maior mancha nas boas de calibração (= 3.671 px) | remover manchas pequenas |
+
+A máscara **C4** de cada imagem de `classificacao` é salva em `dados/gerado/mascaras/` para a etapa
+de atributos (ver resultados na seção 6).
+
 ## 5. Avaliação
 
-Executada sobre as 132 imagens de `test/` (109 defeituosas + 23 boas), pixel a pixel contra o
-ground truth:
+Pixel a pixel contra o ground truth. Etapa 1: as 132 imagens de `test/` (109 defeituosas + 23
+boas). Etapa 3: as 301 imagens do conjunto `classificacao` (109 defeituosas + 192 boas).
 
 | Métrica | Significado |
 |---|---|
@@ -127,7 +153,7 @@ Nesse caso, o indicador principal é o número de falsos positivos.
 
 ## 6. Resultados
 
-Resultados completos em `resultados/avaliacao.txt`; figuras de exemplo em `resultados/*.png`.
+Resultados completos em `resultados/etapa1/avaliacao.txt`; figuras de exemplo em `resultados/etapa1/*.png`.
 
 **Estratégia A — efeito da abertura (Canny 15/40):**
 
@@ -181,10 +207,14 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
   mascarado pela variação normal da impressão. *scratch* é fino e de baixo contraste demais
   (Dice ≈ 0).
 - **Trade-off do limiar:** reduzir o limiar aumenta a detecção à custa de mais falsos positivos.
+- **Morfologia (Etapa 3):** só a abertura reduz falsos positivos de forma útil. Filtrar por área não
+  funciona, porque as manchas falsas da impressão têm o tamanho dos defeitos. A ROI erodida também
+  corta parte de defeitos que ficam na borda da cápsula (*squeeze*).
 
 **Limitações metodológicas:**
-1. Os parâmetros das bordas e as tabelas de sensibilidade foram avaliados no próprio `test/`; falta
-   uma **partição própria** de calibração e avaliação.
+1. Na Etapa 1, os parâmetros das bordas e as tabelas de sensibilidade foram avaliados no próprio
+   `test/`. A partir da Etapa 2 isso foi corrigido com a partição própria; a única escolha feita
+   depois de ver resultados (usar C4 em vez de C5) está declarada na seção 6.
 2. Uma única referência por imagem não tolera a variação normal entre cápsulas boas.
 
 ## 8. Próximos passos
@@ -211,36 +241,38 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
    ```
    pip install -r requirements.txt     # opencv-python, numpy, matplotlib
    ```
-3. Rode o pipeline ou a avaliação:
+3. Rode os scripts **a partir da raiz do repositório**:
    ```
-   python pipeline.py --defeito crack --indice 0     # passo a passo de uma imagem
-   python pipeline.py --calibrar                     # recalibra o limiar do golden template
-   python avaliar.py                                 # avaliação no test/ (~3 min)
-   ```
-4. Gere a partição própria (Etapa 2):
-   ```
-   python particao.py                                # -> dados/particao.csv
-   ```
-5. Gere a máscara final (Etapa 3):
-   ```
-   python segmentacao.py                             # ~10 min na 1ª vez; -> resultados/etapa3/
+   # Etapa 1
+   python src/pipeline.py --defeito crack --indice 0     # passo a passo de uma imagem
+   python src/pipeline.py --calibrar                     # recalibra o limiar do golden template
+   python src/avaliar.py                                 # avaliação no test/ (~3 min)
+
+   # Etapa 2
+   python src/particao.py                                # -> dados/particao.csv
+
+   # Etapa 3
+   python src/segmentacao.py                             # ~10 min na 1ª vez -> resultados/etapa3/
    ```
 
 ## 10. Estrutura do repositório
 
 ```
 pdi-mvtec-capsule/
-├── pipeline.py             pipeline da Etapa 1 (uma imagem, com figuras do passo a passo)
-├── avaliar.py              avaliação nas 132 imagens de test/
-├── particao.py             Etapa 2: partição própria (banco / calibração / classificação)
-├── segmentacao.py          Etapa 3: máscara final (golden template + morfologia)
+├── README.md
+├── requirements.txt
+├── docs/
+│   └── projetos_pdi_quatro_propostas.pdf   enunciado
+├── src/
+│   ├── pipeline.py         Etapa 1: funções do pipeline e passo a passo de uma imagem
+│   ├── avaliar.py          Etapa 1: avaliação nas 132 imagens de test/
+│   ├── particao.py         Etapa 2: partição própria (banco / calibração / classificação)
+│   └── segmentacao.py      Etapa 3: máscara final (golden template + morfologia)
 ├── dados/
 │   ├── particao.csv        partição gerada (semente fixa)
 │   └── gerado/             cache e máscaras da Etapa 3 (não versionado)
-├── requirements.txt
 ├── resultados/
-│   ├── avaliacao.txt       tabelas de resultados (Etapa 1)
-│   ├── *.png               exemplos: bordas e golden template por tipo de defeito
+│   ├── etapa1/             tabelas (avaliacao.txt) e exemplos de bordas e golden template
 │   └── etapa3/             tabela da morfologia e exemplos passo a passo
-└── capsule/                dataset (não versionado)
+└── capsule/                dataset MVTec AD (não versionado)
 ```
