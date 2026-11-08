@@ -35,7 +35,7 @@ etapas mais limitam o desempenho.
 
 ```
 Denoising → Bordas → Morfologia → Segmentação → Atributos → Classificação
-└──────────── Etapa 1: localização ────────────┘ └─── Etapa 2: decisão ───┘
+└──────────── Etapa 1: localização ────────────┘ └────── decisão ──────────┘
 ```
 
 ## 2. Dados e escopo
@@ -67,7 +67,8 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 | Etapa | Descrição | Situação |
 |---|---|---|
 | **1** | Localização do defeito: duas estratégias comparadas | ✅ concluída |
-| **2** | Partição própria, morfologia completa, atributos e classificação | ⏳ próximos passos |
+| **2** | Partição própria (`particao.py`) | ✅ concluída |
+| **3–6** | Máscara final, atributos, classificação e resultados | ⏳ próximos passos |
 
 ## 4. Pipeline da Etapa 1 — localização do defeito
 
@@ -190,17 +191,24 @@ Resultados completos em `resultados/avaliacao.txt`; figuras de exemplo em `resul
    ```
 3. Rode o pipeline ou a avaliação:
    ```
-   python pipeline_etapa1.py --defeito crack --indice 0     # passo a passo de uma imagem
-   python pipeline_etapa1.py --calibrar                     # recalibra o limiar do golden template
-   python avaliar_etapa1.py                                 # avaliação no test/ (~3 min)
+   python pipeline.py --defeito crack --indice 0     # passo a passo de uma imagem
+   python pipeline.py --calibrar                     # recalibra o limiar do golden template
+   python avaliar.py                                 # avaliação no test/ (~3 min)
+   ```
+4. Gere a partição própria (Etapa 2):
+   ```
+   python particao.py                                # -> dados/particao.csv
    ```
 
 ## 10. Estrutura do repositório
 
 ```
 pdi-mvtec-capsule/
-├── pipeline_etapa1.py      pipeline da Etapa 1 (uma imagem, com figuras do passo a passo)
-├── avaliar_etapa1.py       avaliação nas 132 imagens de test/
+├── pipeline.py             pipeline da Etapa 1 (uma imagem, com figuras do passo a passo)
+├── avaliar.py              avaliação nas 132 imagens de test/
+├── particao.py             Etapa 2: partição própria (banco / calibração / classificação)
+├── dados/
+│   └── particao.csv        partição gerada (semente fixa)
 ├── requirements.txt
 ├── resultados/
 │   ├── avaliacao.txt       tabelas de resultados
