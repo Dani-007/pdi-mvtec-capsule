@@ -1,0 +1,19 @@
+Etapa 3 - efeito da morfologia (conjunto 'classificacao': 192 boas + 109 defeituosas)
+Parâmetros calibrados só com as 20 boas de 'calibracao': T = 32, A_MIN = 3671 px
+
+etapa                    hit  FP px/boa  boas c/ alarme  precisão  recall   dice
+C0 limiar               0.64       2844             98%      0.30    0.14  0.128
+C1 +abertura            0.57       2381             85%      0.33    0.13  0.129
+C2 +ROI erodida         0.57       2351             85%      0.33    0.12  0.125
+C3 +fechamento          0.57       2376             85%      0.33    0.12  0.125
+C4 +preenchimento       0.57       2398             85%      0.33    0.12  0.126
+C5 +remove pequenos     0.11        373              9%      0.57    0.05  0.054
+
+Dice | hit por tipo de defeito:
+etapa                              crack    faulty_imprint              poke           scratch           squeeze
+C0 limiar                    0.20 | 0.83       0.05 | 0.68       0.15 | 0.67       0.00 | 0.13       0.24 | 0.95
+C1 +abertura                 0.21 | 0.65       0.04 | 0.59       0.15 | 0.62       0.00 | 0.09       0.25 | 0.95
+C2 +ROI erodida              0.21 | 0.65       0.04 | 0.59       0.15 | 0.62       0.00 | 0.09       0.23 | 0.95
+C3 +fechamento               0.21 | 0.65       0.04 | 0.59       0.15 | 0.62       0.00 | 0.09       0.23 | 0.95
+C4 +preenchimento            0.21 | 0.65       0.05 | 0.59       0.16 | 0.62       0.00 | 0.09       0.23 | 0.95
+C5 +remove pequenos          0.08 | 0.09       0.00 | 0.00       0.03 | 0.05       0.00 | 0.00       0.17 | 0.45

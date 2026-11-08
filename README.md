@@ -68,7 +68,8 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 |---|---|---|
 | **1** | Localização do defeito: duas estratégias comparadas | ✅ concluída |
 | **2** | Partição própria (`particao.py`) | ✅ concluída |
-| **3–6** | Máscara final, atributos, classificação e resultados | ⏳ próximos passos |
+| **3** | Máscara final: golden template + morfologia completa (`segmentacao.py`) | ✅ concluída |
+| **4–6** | Atributos, classificação e resultados | ⏳ próximos passos |
 
 ## 4. Pipeline da Etapa 1 — localização do defeito
 
@@ -146,6 +147,28 @@ Resultados completos em `resultados/avaliacao.txt`; figuras de exemplo em `resul
 | **30** | **0,63** | **2.792** | **0,31** | **0,21 / 0,07 / 0,16 / 0,00 / 0,25** |
 | 40 | 0,42 | 1.029 | 0,42 | 0,21 / 0,00 / 0,12 / 0,00 / 0,24 |
 
+**Etapa 3 — efeito da morfologia** (`resultados/etapa3/`). Golden template com parâmetros
+calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre boas; A_MIN = 3.671 px
+= p95 da maior mancha que sobra em cada boa), avaliado nas 301 imagens de `classificacao`:
+
+| Etapa (cumulativa) | hit | FP px/boa | Boas com alarme | Precisão | Dice |
+|---|---:|---:|---:|---:|---:|
+| C0 limiar | 0,64 | 2.844 | 98% | 0,30 | 0,128 |
+| C1 + abertura 5 (Etapa 1) | 0,57 | 2.381 | 85% | 0,33 | 0,129 |
+| C2 + ROI erodida 9 px | 0,57 | 2.351 | 85% | 0,33 | 0,125 |
+| C3 + fechamento 5 | 0,57 | 2.376 | 85% | 0,33 | 0,125 |
+| C4 + preenchimento | 0,57 | 2.398 | 85% | 0,33 | 0,126 |
+| C5 + remoção de componentes < A_MIN | 0,11 | 373 | 9% | 0,57 | 0,054 |
+
+- A abertura é a única operação que reduz falsos positivos sem custo adicional relevante; ROI
+  erodida, fechamento e preenchimento mudam pouco os números.
+- A remoção por área elimina quase todos os alarmes nas boas, mas também quase todos os defeitos:
+  as manchas falsas das cápsulas boas (impressão "500" deslocada) têm o **mesmo tamanho** dos
+  defeitos, então a área sozinha não separa as duas coisas.
+- Por isso a máscara levada para a Etapa 4 é a **C4**; separar "mancha falsa" de "defeito" fica a
+  cargo dos atributos e do classificador. (Essa escolha foi feita depois de ver a tabela e é
+  declarada aqui.)
+
 ## 7. Discussão e limitações
 
 - **Bordas não separam defeito de estrutura normal.** A cápsula sem defeito já tem muitas bordas
@@ -166,10 +189,9 @@ Resultados completos em `resultados/avaliacao.txt`; figuras de exemplo em `resul
 
 ## 8. Próximos passos
 
-1. **Partição própria:** separar cápsulas normais em referência/calibração e avaliar só no restante,
-   sem escolher parâmetros no conjunto de avaliação.
-2. **Localização:** tornar a referência tolerante à variação normal entre cápsulas boas.
-3. **Morfologia completa:** fechamento, preenchimento de regiões e remoção de componentes pequenos, quantificando o efeito sobre os falsos positivos.
+1. ~~Partição própria~~ (Etapa 2, feita).
+2. ~~Morfologia completa, quantificando o efeito sobre os falsos positivos~~ (Etapa 3, feita).
+3. **Localização:** tornar a referência tolerante à variação normal entre cápsulas boas.
 4. **Atributos** da região segmentada:
    - geometria: área, perímetro, extensão, orientação;
    - intensidade: médias, desvios, histogramas;
@@ -199,6 +221,10 @@ Resultados completos em `resultados/avaliacao.txt`; figuras de exemplo em `resul
    ```
    python particao.py                                # -> dados/particao.csv
    ```
+5. Gere a máscara final (Etapa 3):
+   ```
+   python segmentacao.py                             # ~10 min na 1ª vez; -> resultados/etapa3/
+   ```
 
 ## 10. Estrutura do repositório
 
@@ -207,11 +233,14 @@ pdi-mvtec-capsule/
 ├── pipeline.py             pipeline da Etapa 1 (uma imagem, com figuras do passo a passo)
 ├── avaliar.py              avaliação nas 132 imagens de test/
 ├── particao.py             Etapa 2: partição própria (banco / calibração / classificação)
+├── segmentacao.py          Etapa 3: máscara final (golden template + morfologia)
 ├── dados/
-│   └── particao.csv        partição gerada (semente fixa)
+│   ├── particao.csv        partição gerada (semente fixa)
+│   └── gerado/             cache e máscaras da Etapa 3 (não versionado)
 ├── requirements.txt
 ├── resultados/
-│   ├── avaliacao.txt       tabelas de resultados
-│   └── *.png               exemplos: bordas e golden template por tipo de defeito
+│   ├── avaliacao.txt       tabelas de resultados (Etapa 1)
+│   ├── *.png               exemplos: bordas e golden template por tipo de defeito
+│   └── etapa3/             tabela da morfologia e exemplos passo a passo
 └── capsule/                dataset (não versionado)
 ```

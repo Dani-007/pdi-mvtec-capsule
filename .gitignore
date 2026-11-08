@@ -7,3 +7,6 @@ capsule/
 # Python
 __pycache__/
 *.pyc
+
+# Arquivos gerados pelos scripts (cache e máscaras; recriados ao rodar)
+dados/gerado/
