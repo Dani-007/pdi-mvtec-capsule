@@ -10,7 +10,7 @@ Disciplina de Processamento Digital de Imagens — UFSCar · Prof. Dr. Ricardo J
 1. [Contexto e objetivo](#1-contexto-e-objetivo)
 2. [Dados e escopo](#2-dados-e-escopo)
 3. [Andamento](#3-andamento)
-4. [Pipeline — localização do defeito (Etapas 1–3)](#4-pipeline--localização-do-defeito-etapas-13)
+4. [Pipeline (Etapas 1–4)](#4-pipeline-etapas-14)
 5. [Avaliação](#5-avaliação)
 6. [Resultados](#6-resultados)
 7. [Discussão e limitações](#7-discussão-e-limitações)
@@ -69,9 +69,10 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 | **1** | Localização do defeito: duas estratégias comparadas | ✅ concluída |
 | **2** | Partição própria (`src/particao.py`) | ✅ concluída |
 | **3** | Máscara final: golden template + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
-| **4–6** | Atributos, classificação e resultados | ⏳ próximos passos |
+| **4** | Atributos: ficha de cada cápsula, com a impressão "500" segmentada pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
+| **5–6** | Classificação e resultados finais | ⏳ próximos passos |
 
-## 4. Pipeline — localização do defeito (Etapas 1–3)
+## 4. Pipeline (Etapas 1–4)
 
 ### 4.1 Pré-processamento
 | Passo | Técnica | Justificativa |
@@ -134,6 +135,30 @@ efeito de cada operação:
 
 A máscara **C4** de cada imagem de `classificacao` é salva em `dados/gerado/mascaras/` para a etapa
 de atributos (ver resultados na seção 6).
+
+### 4.7 Etapa 4 — atributos (`src/impressao.py`, `src/atributos.py` → `dados/atributos.csv`)
+
+**Impressão "500" pelo histograma (orientação do professor).** Dentro da máscara da cápsula, o
+histograma separa metade preta (< 45), logo (45–75), metade laranja (75–112) e impressão (> 112).
+Como a iluminação deixa a metade laranja com dois tons, o limiar é calculado no histograma do
+**realce local** (cinza − mediana 45×45), só na metade clara e longe do contorno, por Otsu; depois,
+abertura 5×5 e componentes conexos com forma de algarismo (`resultados/etapa4/impressao_500.png`).
+O "500" **não é apagado** da máscara do defeito, porque os defeitos também caem sobre ele (impressão
+falha ≈ 89% da área, furinho e arranhão ≈ 45%): ele vira atributos.
+
+**Ficha (28 atributos por imagem, 301 imagens de `classificacao`)**, em 3 grupos para a comparação
+do enunciado:
+
+| Grupo | Atributos | Calculados sobre |
+|---|---|---|
+| Forma | nº de manchas, área total, área, perímetro, compacidade (P²/4πA), excentricidade, extensão, solidez, momentos de Hu 1–3 | maior mancha da máscara C4 |
+| Textura | média e desvio do cinza, média e máximo da diferença ao modelo, suavidade, assimetria, uniformidade e entropia do histograma, entropia e uniformidade do LBP (8 vizinhos, raio 1) | pixels da maior mancha |
+| Posição e impressão | fração da mancha sobre o "500", fração na metade preta, distância ao contorno; área relativa do "500" (÷ mediana nas 20 boas de calibração), nº de componentes, nº de buracos e variação de área dos algarismos | mancha e impressão |
+
+Cápsula sem mancha: atributos da mancha = 0 (e `n_manchas` = 0). Nenhum atributo usa os rótulos.
+Distribuições por tipo em `resultados/etapa4/atributos_por_tipo.png`: a área relativa e o nº de
+buracos do "500" destacam a impressão falha; área, compacidade, diferença ao modelo e distância ao
+contorno destacam o *squeeze*.
 
 ## 5. Avaliação
 
@@ -222,10 +247,8 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
 1. ~~Partição própria~~ (Etapa 2, feita).
 2. ~~Morfologia completa, quantificando o efeito sobre os falsos positivos~~ (Etapa 3, feita).
 3. **Localização:** tornar a referência tolerante à variação normal entre cápsulas boas.
-4. **Atributos** da região segmentada:
-   - geometria: área, perímetro, extensão, orientação;
-   - intensidade: médias, desvios, histogramas;
-   - textura: LBP e GLCM.
+4. ~~Atributos da região segmentada~~ (Etapa 4, feita; textura por estatísticas do histograma e
+   LBP, sem GLCM, que não foi vista em aula).
 5. **Classificação** normal/defeituoso e por tipo, com **SVM e Random Forest**, comparando atributos
    geométricos, de textura e a combinação completa.
 6. **Métricas finais:**
@@ -253,6 +276,10 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
 
    # Etapa 3
    python src/segmentacao.py                             # ~10 min na 1ª vez -> resultados/etapa3/
+
+   # Etapa 4
+   python src/impressao.py                               # figura de diagnóstico do "500"
+   python src/atributos.py                               # ~1 min -> dados/atributos.csv
    ```
 
 ## 10. Estrutura do repositório
@@ -267,12 +294,16 @@ pdi-mvtec-capsule/
 │   ├── pipeline.py         Etapa 1: funções do pipeline e passo a passo de uma imagem
 │   ├── avaliar.py          Etapa 1: avaliação nas 132 imagens de test/
 │   ├── particao.py         Etapa 2: partição própria (banco / calibração / classificação)
-│   └── segmentacao.py      Etapa 3: máscara final (golden template + morfologia)
+│   ├── segmentacao.py      Etapa 3: máscara final (golden template + morfologia)
+│   ├── impressao.py        Etapa 4: segmentação do "500" pelo histograma
+│   └── atributos.py        Etapa 4: ficha de atributos de cada cápsula
 ├── dados/
 │   ├── particao.csv        partição gerada (semente fixa)
+│   ├── atributos.csv       fichas de atributos (Etapa 4)
 │   └── gerado/             cache e máscaras da Etapa 3 (não versionado)
 ├── resultados/
 │   ├── etapa1/             tabelas (avaliacao.txt) e exemplos de bordas e golden template
-│   └── etapa3/             tabela da morfologia e exemplos passo a passo
+│   ├── etapa3/             tabela da morfologia e exemplos passo a passo
+│   └── etapa4/             impressão "500" e distribuição dos atributos por tipo
 └── capsule/                dataset MVTec AD (não versionado)
 ```
