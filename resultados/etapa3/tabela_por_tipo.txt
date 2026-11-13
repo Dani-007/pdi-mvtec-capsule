@@ -1,0 +1,8 @@
+Máscara final (C4 +preenchimento) por tipo de defeito (métricas pixel a pixel)
+
+tipo               n    hit  precisão  recall   dice    iou
+crack             23   0.83      0.51    0.22  0.246  0.176
+faulty_imprint    22   0.82      0.14    0.08  0.082  0.044
+poke              21   0.67      0.44    0.18  0.229  0.161
+scratch           23   0.00      0.00    0.00  0.000  0.000
+squeeze           20   0.95      0.40    0.25  0.233  0.145

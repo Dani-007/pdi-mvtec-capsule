@@ -21,6 +21,8 @@ Regras da partição (dados/particao.csv):
 
 Saídas:
     resultados/etapa3/tabela_morfologia.txt|csv   efeito de cada operação
+    resultados/etapa3/tabela_por_tipo.txt|csv     máscara final por tipo de defeito
+    resultados/etapa3/efeito_morfologia.png       hit x boas com alarme por etapa
     resultados/etapa3/exemplo_*.png               passo a passo em exemplos
     dados/gerado/mascaras/<pasta>_<tipo>_<id>.png máscara final (C4), usada na Etapa 4
     dados/gerado/cache_golden.npz                 diferenças já calculadas (cache)
@@ -197,12 +199,26 @@ def avaliar(linhas: list[dict], dif: dict[str, dict], limiar: int, area_min: int
             "precisao": tp / (tp + fp + 1e-9),
             "recall": np.mean([m["recall"] for _, m in defe]),
             "dice": np.mean([m["dice"] for _, m in defe]),
+            "iou": np.mean([m["iou"] for _, m in defe]),
         }
         for t in tipos:
             linha[f"dice_{t}"] = np.mean([m["dice"] for tt, m in defe if tt == t])
             linha[f"hit_{t}"] = np.mean([m["tp"] >= MIN_PX_HIT for tt, m in defe if tt == t])
         linhas_tab.append(linha)
-    return linhas_tab, finais
+
+    # Máscara final (ETAPA_FINAL) separada por tipo de defeito
+    por_tipo = []
+    defe = [(t, m) for t, m, _ in reg[ETAPA_FINAL] if t != "good"]
+    for t in tipos:
+        ms = [m for tt, m in defe if tt == t]
+        tp, fp = sum(m["tp"] for m in ms), sum(m["fp"] for m in ms)
+        por_tipo.append({"tipo": t, "n": len(ms),
+                         "hit": np.mean([m["tp"] >= MIN_PX_HIT for m in ms]),
+                         "precisao": tp / (tp + fp + 1e-9),
+                         "recall": np.mean([m["recall"] for m in ms]),
+                         "dice": np.mean([m["dice"] for m in ms]),
+                         "iou": np.mean([m["iou"] for m in ms])})
+    return linhas_tab, finais, por_tipo
 
 
 def salvar_tabela(tab: list[dict], limiar: int, area_min: int) -> str:
@@ -217,10 +233,10 @@ def salvar_tabela(tab: list[dict], limiar: int, area_min: int) -> str:
            f"Parâmetros calibrados só com as 20 boas de 'calibracao': T = {limiar}, A_MIN = {area_min} px",
            "",
            f"{'etapa':<22}{'hit':>6}{'FP px/boa':>11}{'boas c/ alarme':>16}"
-           f"{'precisão':>10}{'recall':>8}{'dice':>7}"]
+           f"{'precisão':>10}{'recall':>8}{'dice':>7}{'iou':>7}"]
     for l in tab:
         txt.append(f"{l['etapa']:<22}{l['hit']:6.2f}{l['FP_px_boa']:11.0f}{l['boas_com_alarme']:16.0%}"
-                   f"{l['precisao']:10.2f}{l['recall']:8.2f}{l['dice']:7.3f}")
+                   f"{l['precisao']:10.2f}{l['recall']:8.2f}{l['dice']:7.3f}{l['iou']:7.3f}")
     txt += ["", "Dice | hit por tipo de defeito:",
             f"{'etapa':<22}" + "".join(f"{t:>18}" for t in
                                        ["crack", "faulty_imprint", "poke", "scratch", "squeeze"])]
@@ -231,6 +247,50 @@ def salvar_tabela(tab: list[dict], limiar: int, area_min: int) -> str:
     texto = "\n".join(txt)
     (DIR_RESULT / "tabela_morfologia.txt").write_text(texto + "\n", encoding="utf-8")
     return texto
+
+
+def salvar_por_tipo(por_tipo: list[dict]) -> str:
+    with open(DIR_RESULT / "tabela_por_tipo.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(por_tipo[0].keys()), lineterminator="\n")
+        w.writeheader()
+        for l in por_tipo:
+            w.writerow({k: (round(v, 4) if isinstance(v, float) else v) for k, v in l.items()})
+    txt = [f"Máscara final ({ETAPA_FINAL}) por tipo de defeito (métricas pixel a pixel)", "",
+           f"{'tipo':<16}{'n':>4}{'hit':>7}{'precisão':>10}{'recall':>8}{'dice':>7}{'iou':>7}"]
+    for l in por_tipo:
+        txt.append(f"{l['tipo']:<16}{l['n']:4d}{l['hit']:7.2f}{l['precisao']:10.2f}"
+                   f"{l['recall']:8.2f}{l['dice']:7.3f}{l['iou']:7.3f}")
+    texto = "\n".join(txt)
+    (DIR_RESULT / "tabela_por_tipo.txt").write_text(texto + "\n", encoding="utf-8")
+    return texto
+
+
+def figura_efeito(tab: list[dict]) -> None:
+    """Barras: % de defeituosas encontradas (hit) x % de boas com alarme, por etapa."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    nomes = [l["etapa"].replace(" +", "\n+") for l in tab]
+    hit = [100 * l["hit"] for l in tab]
+    alarme = [100 * l["boas_com_alarme"] for l in tab]
+    x = np.arange(len(tab))
+    fig, ax = plt.subplots(figsize=(12, 5))
+    b1 = ax.bar(x - 0.19, hit, 0.38, color="#1baf7a", label="defeituosas encontradas (hit)")
+    b2 = ax.bar(x + 0.19, alarme, 0.38, color="#e34948", label="boas com alarme falso")
+    for b in list(b1) + list(b2):
+        ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 1, f"{b.get_height():.0f}%",
+                ha="center", fontsize=10)
+    ax.set_xticks(x)
+    ax.set_xticklabels(nomes)
+    ax.set_ylabel("% das cápsulas")
+    ax.set_ylim(0, 110)
+    ax.legend(frameon=False, loc="upper right")
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_title("Etapa 3: efeito de cada operação (301 cápsulas de classificação)")
+    fig.tight_layout()
+    fig.savefig(DIR_RESULT / "efeito_morfologia.png", dpi=90)
+    plt.close(fig)
 
 
 def figura_exemplos(linhas: list[dict], dif: dict, limiar: int, area_min: int) -> None:
@@ -279,8 +339,10 @@ def main() -> None:
     limiar, area_min = calibrar({l["arquivo"]: dif[l["arquivo"]] for l in cal})
     print(f"Calibrado em 20 boas: T = {limiar}, A_MIN = {area_min} px\n")
 
-    tab, finais = avaliar(cls, dif, limiar, area_min)
+    tab, finais, por_tipo = avaliar(cls, dif, limiar, area_min)
     print(salvar_tabela(tab, limiar, area_min))
+    print("\n" + salvar_por_tipo(por_tipo))
+    figura_efeito(tab)
 
     DIR_MASCARAS.mkdir(parents=True, exist_ok=True)
     for arq, m in finais.items():

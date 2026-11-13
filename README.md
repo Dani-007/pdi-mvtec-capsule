@@ -71,7 +71,7 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 | **3** | Máscara final: golden template com "500" e logo realinhados + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
 | **4** | Atributos: ficha da mancha mais suspeita, com "500" e logo segmentados pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
 | **5** | Classificação: SVM × Random Forest, por grupo de atributos (`src/classificacao.py`) | ✅ concluída |
-| **6** | Discussão final e relatório | ⏳ próximo passo |
+| **6** | Relatório final (`docs/relatorio.md`) | ✅ versão inicial |
 
 ## 4. Pipeline (Etapas 1–5)
 
@@ -376,7 +376,9 @@ Evolução da classificação com as mudanças de localização e de ficha (melh
 4. ~~Atributos da região segmentada~~ (Etapa 4, feita; textura por estatísticas do histograma e
    LBP, sem GLCM, que não foi vista em aula).
 5. ~~Classificação com SVM e Random Forest, por grupo de atributos~~ (Etapa 5, feita).
-6. **Relatório final:** consolidar resultados, exemplos de erro e a resposta à questão de projeto.
+6. ~~Relatório final~~ (`docs/relatorio.md`, versão inicial).
+7. **Possível continuação:** tratar as regiões variáveis restantes (logo parcialmente visível,
+   contorno, reflexos) com segmentação e comparação específicas, como foi feito com o "500".
 
 ## 9. Como executar
 
@@ -413,7 +415,8 @@ pdi-mvtec-capsule/
 ├── README.md
 ├── requirements.txt
 ├── docs/
-│   └── projetos_pdi_quatro_propostas.pdf   enunciado
+│   ├── projetos_pdi_quatro_propostas.pdf   enunciado
+│   └── relatorio.md        relatório final (Etapa 6)
 ├── src/
 │   ├── pipeline.py         Etapa 1: funções do pipeline e passo a passo de uma imagem
 │   ├── avaliar.py          Etapa 1: avaliação nas 132 imagens de test/
@@ -428,7 +431,7 @@ pdi-mvtec-capsule/
 │   └── gerado/             cache e máscaras da Etapa 3 (não versionado)
 ├── resultados/
 │   ├── etapa1/             tabelas (avaliacao.txt) e exemplos de bordas e golden template
-│   ├── etapa3/             tabela da morfologia e exemplos passo a passo
+│   ├── etapa3/             tabelas da morfologia e por tipo de defeito, exemplos passo a passo
 │   ├── etapa4/             impressão "500" e distribuição dos atributos por tipo
 │   └── etapa5/             tabelas, matrizes de confusão, importância dos atributos e erros
 └── capsule/                dataset MVTec AD (não versionado)
