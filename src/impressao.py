@@ -19,9 +19,18 @@ Por isso o histograma é calculado sobre o realce local, e não sobre o cinza:
     5. abertura 5x5 e componentes conexos: ficam só os "algarismos" (área >= 300 px,
        altura >= 40 px e largura/altura < 3), o que descarta reflexos compridos.
 
-O "500" NÃO é apagado da máscara do defeito: os defeitos reais também caem sobre ele
-(impressão falha ~89% da área, furinho e arranhão ~45%). Ele vira atributos (atributos.py):
-quanto da mancha está sobre a impressão e como está a forma da própria impressão.
+O logo "actavis" (na metade preta) é segmentado do mesmo jeito, no histograma do realce
+dentro da metade escura (segmentar_logo). Quando a cápsula está girada e o logo não aparece, o
+limiar de Otsu cai para quase zero; por isso há um contraste mínimo (REALCE_MIN_LOGO).
+
+Uso das máscaras:
+  1. Na localização (segmentacao.py): a cápsula gira em torno do próprio eixo, então o "500"
+     e o logo aparecem alguns pixels deslocados em relação à referência, mesmo depois do
+     alinhamento global. Na região deles, a referência é realinhada localmente por template
+     matching (realinhar_local) antes da subtração. A variação normal da impressão some e uma
+     falha de impressão continua aparecendo (a forma é diferente, não só a posição).
+  2. Nos atributos (atributos.py): o "500" NÃO é apagado da mancha, porque os defeitos também
+     caem sobre ele (impressão falha ~89% da área, furinho e arranhão ~45%); ele vira atributos.
 
 Uso (figura de diagnóstico):  python src/impressao.py
 """
@@ -37,6 +46,10 @@ FUNDO_MIN_CLARO = 60     # fundo local > 60 = metade laranja
 AREA_MIN = 300
 ALTURA_MIN = 40
 RAZAO_MAX = 3.0
+FUNDO_MAX_ESCURO = 60    # fundo local <= 60 = metade preta (onde fica o logo)
+REALCE_MIN_LOGO = 6      # sem esse contraste mínimo, considera que o logo não está visível
+BUSCA_LOCAL = 20         # deslocamento máximo (px) procurado no realinhamento local
+DILATA_ZONA = 15         # zona ao redor da impressão/logo onde a diferença é recalculada
 
 
 def _ee(k: int) -> np.ndarray:
@@ -63,6 +76,65 @@ def segmentar_impressao(cinza: np.ndarray, mascara_capsula: np.ndarray) -> tuple
         if area >= AREA_MIN and h >= ALTURA_MIN and w / h < RAZAO_MAX:
             saida[rotulos == i] = 255
     return saida, int(t)
+
+
+def segmentar_logo(cinza: np.ndarray, mascara_capsula: np.ndarray) -> np.ndarray:
+    """Máscara do logo "actavis": histograma do realce local na metade preta, Otsu, abertura
+    3x3 e componentes do tamanho de letras. Vazia se o logo não estiver visível."""
+    roi = cv2.erode(mascara_capsula, _ee(EROSAO_ROI))
+    fundo = cv2.medianBlur(cinza, JANELA_FUNDO)
+    realce = cv2.subtract(cinza, fundo)
+    regiao = (roi > 0) & (fundo <= FUNDO_MAX_ESCURO)
+    valores = realce[regiao]
+    if valores.size < 100:
+        return np.zeros_like(cinza)
+    t, _ = cv2.threshold(valores.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if t < REALCE_MIN_LOGO:
+        return np.zeros_like(cinza)
+    binaria = np.where((realce > t) & regiao, 255, 0).astype(np.uint8)
+    binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, _ee(3))
+    n, rotulos, stats, _ = cv2.connectedComponentsWithStats(binaria, connectivity=8)
+    saida = np.zeros_like(binaria)
+    for i in range(1, n):
+        _, _, w, h, area = stats[i]
+        if area >= 60 and w / h < 6 and h / w < 6:
+            saida[rotulos == i] = 255
+    return saida
+
+
+def realinhar_local(dif: np.ndarray, teste: np.ndarray, ref: np.ndarray,
+                    zona: np.ndarray) -> np.ndarray:
+    """Recalcula |teste - ref| dentro da zona (impressão ou logo), depois de achar, por
+    template matching, o pequeno deslocamento que melhor encaixa a referência no teste."""
+    if not zona.any():
+        return dif
+    ys, xs = np.where(zona > 0)
+    h, w = teste.shape
+    b = BUSCA_LOCAL
+    y0, y1 = max(ys.min() - 10, b), min(ys.max() + 10, h - b - 1)
+    x0, x1 = max(xs.min() - 10, b), min(xs.max() + 10, w - b - 1)
+    if y1 <= y0 or x1 <= x0:
+        return dif
+    recorte = teste[y0:y1, x0:x1]
+    vizinhanca = ref[y0 - b:y1 + b, x0 - b:x1 + b]
+    custo = cv2.matchTemplate(vizinhanca, recorte, cv2.TM_SQDIFF_NORMED)
+    _, _, (mx, my), _ = cv2.minMaxLoc(custo)
+    dx, dy = mx - b, my - b
+    local = cv2.absdiff(recorte, ref[y0 + dy:y1 + dy, x0 + dx:x1 + dx])
+    dentro = cv2.dilate(zona, _ee(DILATA_ZONA))[y0:y1, x0:x1] > 0
+    saida = dif.copy()
+    saida[y0:y1, x0:x1][dentro] = local[dentro]
+    return saida
+
+
+def diferenca_com_impressao(teste: np.ndarray, ref: np.ndarray, mascara: np.ndarray) -> np.ndarray:
+    """|teste - ref| com o "500" e o logo realinhados localmente (ver docstring do módulo).
+    `teste` já está alinhado globalmente à referência; `mascara` é a máscara da referência."""
+    dif = cv2.absdiff(teste, ref)
+    zona_500 = segmentar_impressao(teste, mascara)[0] | segmentar_impressao(ref, mascara)[0]
+    dif = realinhar_local(dif, teste, ref, zona_500)
+    zona_logo = segmentar_logo(teste, mascara) | segmentar_logo(ref, mascara)
+    return realinhar_local(dif, teste, ref, zona_logo)
 
 
 def descrever_impressao(mascara_500: np.ndarray) -> dict[str, float]:

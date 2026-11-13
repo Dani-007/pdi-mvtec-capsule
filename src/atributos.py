@@ -5,24 +5,33 @@ Entrada (por imagem do conjunto 'classificacao'):
     - máscara final C4 da Etapa 3 (dados/gerado/mascaras/), ou seja, as manchas suspeitas;
     - diferença do golden template (dados/gerado/cache_golden.npz);
     - imagem em cinza (bilateral) e máscara da cápsula (pipeline.py);
-    - máscara da impressão "500" segmentada pelo histograma (impressao.py).
+    - máscaras da impressão "500" e do logo, segmentadas pelo histograma (impressao.py).
+
+Mancha principal = a mancha MAIS SUSPEITA, e não simplesmente a maior. Cada mancha da máscara
+C4 é comparada com as zonas do "500" e do logo (dilatadas 15 px): manchas com metade ou mais
+da área sobre elas são variação normal da impressão/logo, que muda conforme a cápsula gira.
+A principal é a maior das OUTRAS manchas. Motivo (diagnóstico da Etapa 3): nas cápsulas boas,
+~76% dos pixels falsos que sobram ficam sobre o logo, e a maior mancha costumava ser a do logo,
+escondendo o defeito real numa mancha menor. As manchas sobre o "500" e o logo não são
+descartadas: viram atributos próprios (área sobre cada zona), e a impressão falha continua
+descrita pelos atributos da impressão.
 
 Saída: dados/atributos.csv, uma linha por imagem, com as colunas de identificação
 (arquivo, tipo, rotulo, fold) e os atributos abaixo, organizados em 3 grupos para a
 comparação pedida no enunciado (forma x textura x todos):
 
-    FORMA (geometria da maior mancha + quantidade/área de manchas)
-        n_manchas, area_total, area_maior, perimetro, compacidade, excentricidade,
-        extensao, solidez, hu1, hu2, hu3
-    TEXTURA (intensidade e textura dentro da maior mancha)
+    FORMA (geometria da mancha principal + quantidade/área de manchas)
+        n_manchas, n_suspeitas, area_suspeitas, area_maior, perimetro, compacidade,
+        excentricidade, extensao, solidez, hu1, hu2, hu3
+    TEXTURA (intensidade e textura dentro da mancha principal)
         media_cinza, desvio_cinza, media_dif, max_dif,
         suavidade, assimetria, uniformidade, entropia        (estatísticas do histograma)
         lbp_entropia, lbp_uniformidade                         (LBP 8 vizinhos, raio 1)
-    POSIÇÃO E IMPRESSÃO (onde está a mancha e como está o "500")
-        frac_sobre_500, frac_metade_preta, dist_borda,
+    POSIÇÃO E IMPRESSÃO (onde está a mancha principal, manchas sobre "500"/logo e o "500")
+        frac_metade_preta, dist_borda, area_sobre_500, area_sobre_logo,
         imp_area_rel, imp_componentes, imp_buracos, imp_cv_area_algarismos
 
-Cápsula sem nenhuma mancha: atributos de forma/textura da mancha = 0 (n_manchas = 0 já
+Cápsula sem mancha suspeita: atributos de forma/textura da principal = 0 (n_suspeitas = 0 já
 informa o classificador). Os atributos da impressão existem sempre.
 
 A única referência usada para normalizar (área típica do "500") vem do conjunto
@@ -39,22 +48,24 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from impressao import descrever_impressao, segmentar_impressao
+from impressao import descrever_impressao, segmentar_impressao, segmentar_logo
 from particao import carregar_particao
 from pipeline import RAIZ, carregar_imagem, converter_cinza, filtro_bilateral, segmentar_capsula
 from segmentacao import CACHE, DIR_MASCARAS
 
 SAIDA = RAIZ / "dados" / "atributos.csv"
 DIR_RESULT = RAIZ / "resultados" / "etapa4"
-DILATA_500 = 15          # tolerância (px) ao redor da impressão
+DILATA_500 = 15          # tolerância (px) ao redor da impressão e do logo
+FRAC_ZONA = 0.5          # mancha com >= 50% da área sobre o "500"/logo = variação normal
 FUNDO_PRETO = 45         # fundo local (mediana 45x45) < 45 = metade preta
 
 GRUPOS = {
-    "forma": ["n_manchas", "area_total", "area_maior", "perimetro", "compacidade",
-              "excentricidade", "extensao", "solidez", "hu1", "hu2", "hu3"],
+    "forma": ["n_manchas", "n_suspeitas", "area_suspeitas", "area_maior", "perimetro",
+              "compacidade", "excentricidade", "extensao", "solidez", "hu1", "hu2", "hu3"],
     "textura": ["media_cinza", "desvio_cinza", "media_dif", "max_dif", "suavidade",
                 "assimetria", "uniformidade", "entropia", "lbp_entropia", "lbp_uniformidade"],
-    "posicao_impressao": ["frac_sobre_500", "frac_metade_preta", "dist_borda", "imp_area_rel",
+    "posicao_impressao": ["frac_metade_preta", "dist_borda", "area_sobre_500", "area_sobre_logo",
+                          "imp_area_rel",
                           "imp_componentes", "imp_buracos", "imp_cv_area_algarismos"],
 }
 ATRIBUTOS = [a for g in GRUPOS.values() for a in g]
@@ -123,7 +134,8 @@ def descrever_forma(maior: np.ndarray) -> dict[str, float]:
 
 
 def ficha(cinza: np.ndarray, capsula: np.ndarray, manchas: np.ndarray, dif: np.ndarray,
-          imp: np.ndarray, area_500_ref: float, codigos_lbp: np.ndarray) -> dict[str, float]:
+          imp: np.ndarray, logo: np.ndarray, area_500_ref: float,
+          codigos_lbp: np.ndarray) -> dict[str, float]:
     f = {a: 0.0 for a in ATRIBUTOS}
 
     # Impressão (existe sempre)
@@ -137,8 +149,22 @@ def ficha(cinza: np.ndarray, capsula: np.ndarray, manchas: np.ndarray, dif: np.n
     f["n_manchas"] = float(n - 1)
     if n <= 1:
         return f
-    f["area_total"] = float(stats[1:, cv2.CC_STAT_AREA].sum())
-    i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+
+    # Manchas sobre o "500"/logo (variação normal) x manchas suspeitas
+    zona_500 = cv2.dilate(imp, _ee(DILATA_500)) > 0
+    zona_logo = cv2.dilate(logo, _ee(DILATA_500)) > 0
+    sobre_500 = np.bincount(rotulos[zona_500], minlength=n)
+    sobre_logo = np.bincount(rotulos[zona_logo], minlength=n)
+    areas = stats[:, cv2.CC_STAT_AREA].astype(float)
+    na_zona = (sobre_500 + sobre_logo) >= FRAC_ZONA * areas
+    f["area_sobre_500"] = float(sobre_500[1:].sum())
+    f["area_sobre_logo"] = float(sobre_logo[1:].sum())
+    suspeitas = [i for i in range(1, n) if not na_zona[i]]
+    f["n_suspeitas"] = float(len(suspeitas))
+    if not suspeitas:
+        return f
+    f["area_suspeitas"] = float(areas[suspeitas].sum())
+    i = max(suspeitas, key=lambda k: areas[k])
     maior = np.where(rotulos == i, 255, 0).astype(np.uint8)
     sel = maior > 0
 
@@ -152,8 +178,6 @@ def ficha(cinza: np.ndarray, capsula: np.ndarray, manchas: np.ndarray, dif: np.n
     lb = estatisticas_histograma(codigos_lbp[sel])
     f["lbp_entropia"], f["lbp_uniformidade"] = lb["entropia"], lb["uniformidade"]
 
-    zona_500 = cv2.dilate(imp, _ee(DILATA_500)) > 0
-    f["frac_sobre_500"] = float(np.mean(zona_500[sel]))
     fundo = cv2.medianBlur(cinza, 45)
     f["frac_metade_preta"] = float(np.mean(fundo[sel] < FUNDO_PRETO))
     dist = cv2.distanceTransform(capsula, cv2.DIST_L2, 5)        # distância ao contorno
@@ -162,11 +186,11 @@ def ficha(cinza: np.ndarray, capsula: np.ndarray, manchas: np.ndarray, dif: np.n
 
 
 # -----------------------------------------------------------------------------
-def preparar(caminho: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def preparar(caminho: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     cinza = filtro_bilateral(converter_cinza(carregar_imagem(caminho)))
     capsula, _ = segmentar_capsula(cinza)
     imp, _ = segmentar_impressao(cinza, capsula)
-    return cinza, capsula, imp
+    return cinza, capsula, imp, segmentar_logo(cinza, capsula)
 
 
 def area_500_calibracao() -> float:
@@ -181,8 +205,8 @@ def figura(linhas: list[dict]) -> None:
     import matplotlib.pyplot as plt
 
     tipos = ["good", "crack", "faulty_imprint", "poke", "scratch", "squeeze"]
-    mostrar = ["n_manchas", "area_maior", "compacidade", "excentricidade", "media_dif",
-               "entropia", "frac_sobre_500", "dist_borda", "imp_area_rel", "imp_buracos"]
+    mostrar = ["n_suspeitas", "area_maior", "compacidade", "excentricidade", "media_dif",
+               "entropia", "area_sobre_logo", "dist_borda", "imp_area_rel", "imp_buracos"]
     fig, eixos = plt.subplots(2, 5, figsize=(22, 8))
     for ax, a in zip(eixos.ravel(), mostrar):
         dados = [[l[a] for l in linhas if l["tipo"] == t] for t in tipos]
@@ -208,11 +232,11 @@ def main() -> None:
     saida = []
     cls = carregar_particao("classificacao")
     for k, l in enumerate(cls, 1):
-        cinza, capsula, imp = preparar(l["caminho"])
+        cinza, capsula, imp, logo = preparar(l["caminho"])
         manchas = cv2.imread(str(DIR_MASCARAS / l["arquivo"].replace("/", "_")),
                              cv2.IMREAD_GRAYSCALE)
         dif = cache[l["arquivo"].replace("/", "__") + "__diff"]
-        f = ficha(cinza, capsula, manchas, dif, imp, ref_500, lbp(cinza))
+        f = ficha(cinza, capsula, manchas, dif, imp, logo, ref_500, lbp(cinza))
         saida.append({"arquivo": l["arquivo"], "tipo": l["tipo"], "rotulo": l["rotulo"],
                       "fold": l["fold"], **f})
         if k % 50 == 0:

@@ -1,0 +1,9 @@
+grupo              classificador  acuracia_balanceada  precisao  recall  especificidade  f1_defeituosa  roc_auc
+forma              SVM            0.517                0.371     0.908   0.125           0.527          0.636  
+forma              RandomForest   0.497                0.360     0.936   0.057           0.520          0.651  
+textura            SVM            0.563                0.397     0.917   0.208           0.554          0.649  
+textura            RandomForest   0.532                0.379     0.945   0.120           0.541          0.627  
+posicao_impressao  SVM            0.550                0.389     0.917   0.182           0.546          0.689  
+posicao_impressao  RandomForest   0.556                0.392     0.936   0.177           0.553          0.740  
+todos              SVM            0.564                0.397     0.936   0.193           0.557          0.752  
+todos              RandomForest   0.562                0.395     0.936   0.188           0.556          0.747  

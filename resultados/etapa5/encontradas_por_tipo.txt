@@ -1,0 +1,6 @@
+Defeituosas encontradas por tipo (binária, prioriza defeitos):
+  crack            21 / 23
+  faulty_imprint   22 / 22
+  poke             19 / 21
+  scratch          21 / 23
+  squeeze          19 / 20

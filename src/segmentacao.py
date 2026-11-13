@@ -1,8 +1,10 @@
 """
 Etapa 3 - Máscara final do defeito (golden template + morfologia completa).
 
-Parte do golden template da Etapa 1 (pipeline.py) e acrescenta a limpeza
-morfológica, medindo o efeito de cada operação sobre os falsos positivos:
+Parte do golden template da Etapa 1 (pipeline.py), com o "500" e o logo realinhados
+localmente antes da subtração (impressao.diferenca_com_impressao; desligue com
+CORRIGIR_IMPRESSAO = False para reproduzir a versão sem esse tratamento), e acrescenta a
+limpeza morfológica, medindo o efeito de cada operação sobre os falsos positivos:
 
     C0  |teste - ref| > T                            (só limiar, ROI = cápsula inteira)
     C1  + abertura 5x5                               (= Etapa 1 do Daniel)
@@ -34,6 +36,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from impressao import diferenca_com_impressao
 from particao import carregar_particao
 from pipeline import (
     ROI_EROSAO, carregar_banco_referencias, carregar_imagem, carregar_mascara_gt,
@@ -43,7 +46,8 @@ from pipeline import (
 
 RAIZ = Path(__file__).resolve().parent.parent   # raiz do repositório (este arquivo está em src/)
 GERADO = RAIZ / "dados" / "gerado"
-CACHE = GERADO / "cache_golden.npz"
+CORRIGIR_IMPRESSAO = True
+CACHE = GERADO / ("cache_golden_impressao.npz" if CORRIGIR_IMPRESSAO else "cache_golden.npz")
 DIR_MASCARAS = GERADO / "mascaras"
 DIR_RESULT = RAIZ / "resultados" / "etapa3"
 
@@ -87,7 +91,9 @@ def calcular_diferencas(linhas: list[dict], banco: list[dict]) -> dict[str, dict
         if chave + "__diff" not in cache:
             img = filtro_bilateral(converter_cinza(carregar_imagem(l["caminho"])))
             ref, alinhada = selecionar_referencia(img, banco)
-            cache[chave + "__diff"] = cv2.absdiff(alinhada, ref["imagem"])
+            cache[chave + "__diff"] = (
+                diferenca_com_impressao(alinhada, ref["imagem"], ref["mascara"])
+                if CORRIGIR_IMPRESSAO else cv2.absdiff(alinhada, ref["imagem"]))
             cache[chave + "__roi"] = ref["mascara"]
             novos += 1
             if novos % 25 == 0:

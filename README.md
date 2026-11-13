@@ -68,8 +68,8 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 |---|---|---|
 | **1** | Localização do defeito: duas estratégias comparadas | ✅ concluída |
 | **2** | Partição própria (`src/particao.py`) | ✅ concluída |
-| **3** | Máscara final: golden template + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
-| **4** | Atributos: ficha de cada cápsula, com a impressão "500" segmentada pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
+| **3** | Máscara final: golden template com "500" e logo realinhados + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
+| **4** | Atributos: ficha da mancha mais suspeita, com "500" e logo segmentados pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
 | **5** | Classificação: SVM × Random Forest, por grupo de atributos (`src/classificacao.py`) | ✅ concluída |
 | **6** | Discussão final e relatório | ⏳ próximo passo |
 
@@ -122,17 +122,25 @@ dão a nota final:
 | `classificacao` | 169 + 23 normais e 109 defeituosas | avaliação da segmentação; atributos e classificação com validação cruzada em **5 folds** estratificados por tipo (semente 42) |
 
 ### 4.6 Etapa 3 — máscara final (`src/segmentacao.py`)
-Golden template da Etapa 1 seguido de morfologia completa, aplicada de forma cumulativa para medir o
-efeito de cada operação:
+Golden template da Etapa 1 com o **"500" e o logo realinhados localmente** e, depois, morfologia
+completa, aplicada de forma cumulativa para medir o efeito de cada operação.
+
+**Realinhamento local da impressão e do logo** (`src/impressao.py`, `diferenca_com_impressao`).
+A cápsula gira em torno do próprio eixo, então o "500" e o logo aparecem alguns pixels deslocados
+em relação à referência mesmo depois do alinhamento global, e a subtração acusava essa variação
+normal. O "500" e o logo são segmentados pelo histograma do realce local (seção 4.7) no teste e
+na referência; na região deles, o deslocamento local é estimado por **template matching** (busca
+de ±20 px) e a diferença é recalculada com a referência deslocada. A variação de posição some;
+uma falha de impressão continua aparecendo, porque muda a forma, não só a posição.
 
 | Passo | Operação | Objetivo |
 |---|---|---|
-| C0 | \|teste − ref\| > T, com T = p99 da diferença nas 20 boas de calibração (= 32) | marcação inicial |
+| C0 | \|teste − ref\| > T, com T = p99 da diferença nas 20 boas de calibração (= 27) | marcação inicial |
 | C1 | abertura 5×5 | remover fragmentos finos (= Etapa 1) |
 | C2 | ROI erodida 9 px | excluir o contorno da cápsula |
 | C3 | fechamento 5×5 | unir pedaços do mesmo defeito |
 | C4 | preenchimento de buracos (*flood fill*) | manchas sólidas |
-| C5 | remoção de componentes conexos < A_MIN, com A_MIN = p95 da maior mancha nas boas de calibração (= 3.671 px) | remover manchas pequenas |
+| C5 | remoção de componentes conexos < A_MIN, com A_MIN = p95 da maior mancha nas boas de calibração (= 2.450 px) | remover manchas pequenas |
 
 A máscara **C4** de cada imagem de `classificacao` é salva em `dados/gerado/mascaras/` para a etapa
 de atributos (ver resultados na seção 6).
@@ -144,19 +152,30 @@ histograma separa metade preta (< 45), logo (45–75), metade laranja (75–112)
 Como a iluminação deixa a metade laranja com dois tons, o limiar é calculado no histograma do
 **realce local** (cinza − mediana 45×45), só na metade clara e longe do contorno, por Otsu; depois,
 abertura 5×5 e componentes conexos com forma de algarismo (`resultados/etapa4/impressao_500.png`).
-O "500" **não é apagado** da máscara do defeito, porque os defeitos também caem sobre ele (impressão
-falha ≈ 89% da área, furinho e arranhão ≈ 45%): ele vira atributos.
+O **logo** é segmentado do mesmo jeito, na metade preta, com um contraste mínimo (quando a
+cápsula está girada, o logo pode não aparecer). As duas máscaras são usadas no realinhamento local
+da Etapa 3 (seção 4.6). Na máscara do defeito, o "500" e o logo **não são apagados**, porque os
+defeitos também caem sobre eles (sobre o "500": impressão falha ≈ 89% da área, furinho e arranhão
+≈ 45%; sobre o logo: rachadura ≈ 14%, furinho ≈ 20%).
 
-**Ficha (28 atributos por imagem, 301 imagens de `classificacao`)**, em 3 grupos para a comparação
+**Mancha principal = a mais suspeita.** Cada mancha da máscara C4 com metade ou mais da área sobre o
+"500" ou o logo (dilatados 15 px) é tratada como variação normal; a mancha descrita pela ficha é a
+maior entre as **outras** manchas. Motivo: depois da Etapa 3, ≈ 76% dos pixels falsos que sobram nas
+cápsulas boas ficam sobre o logo, e a maior mancha costumava ser a do logo, escondendo o defeito
+real numa mancha menor. As manchas sobre o "500" e o logo viram atributos próprios (área sobre cada
+zona).
+
+**Ficha (30 atributos por imagem, 301 imagens de `classificacao`)**, em 3 grupos para a comparação
 do enunciado:
 
 | Grupo | Atributos | Calculados sobre |
 |---|---|---|
-| Forma | nº de manchas, área total, área, perímetro, compacidade (P²/4πA), excentricidade, extensão, solidez, momentos de Hu 1–3 | maior mancha da máscara C4 |
-| Textura | média e desvio do cinza, média e máximo da diferença ao modelo, suavidade, assimetria, uniformidade e entropia do histograma, entropia e uniformidade do LBP (8 vizinhos, raio 1) | pixels da maior mancha |
-| Posição e impressão | fração da mancha sobre o "500", fração na metade preta, distância ao contorno; área relativa do "500" (÷ mediana nas 20 boas de calibração), nº de componentes, nº de buracos e variação de área dos algarismos | mancha e impressão |
+| Forma | nº de manchas, nº e área das manchas suspeitas, área, perímetro, compacidade (P²/4πA), excentricidade, extensão, solidez, momentos de Hu 1–3 | mancha principal |
+| Textura | média e desvio do cinza, média e máximo da diferença ao modelo, suavidade, assimetria, uniformidade e entropia do histograma, entropia e uniformidade do LBP (8 vizinhos, raio 1) | pixels da mancha principal |
+| Posição e impressão | fração na metade preta e distância ao contorno (mancha principal); área de mancha sobre o "500" e sobre o logo; área relativa do "500" (÷ mediana nas 20 boas de calibração), nº de componentes, nº de buracos e variação de área dos algarismos | manchas e impressão |
 
-Cápsula sem mancha: atributos da mancha = 0 (e `n_manchas` = 0). Nenhum atributo usa os rótulos.
+Cápsula sem mancha suspeita: atributos da mancha principal = 0 (e `n_suspeitas` = 0). Nenhum
+atributo usa os rótulos.
 Distribuições por tipo em `resultados/etapa4/atributos_por_tipo.png`: a área relativa e o nº de
 buracos do "500" destacam a impressão falha; área, compacidade, diferença ao modelo e distância ao
 contorno destacam o *squeeze*.
@@ -175,6 +194,12 @@ Forest** (300 árvores). Classes desbalanceadas são tratadas com `class_weight=
 4 folds, testa no 5º), de modo que cada imagem é testada uma vez por um modelo que não a viu. A
 padronização e a escolha de hiperparâmetros (busca em grade com validação interna de 3 partes;
 SVM: C e γ; RF: profundidade e folhas mínimas) usam **só o treino de cada rodada**.
+
+**Ponto de operação que prioriza os defeitos.** O objetivo é achar os defeitos: rejeitar uma
+cápsula boa é um erro menor que aprovar uma defeituosa. Além da decisão padrão, a tarefa binária é
+avaliada com um limiar sobre a pontuação "defeituosa" escolhido em cada rodada **só no treino**
+(previsões fora da amostra da validação interna): o maior limiar que ainda encontra ≥ 90% das
+defeituosas do treino.
 
 ## 5. Avaliação
 
@@ -223,54 +248,84 @@ Resultados completos em `resultados/etapa1/avaliacao.txt`; figuras de exemplo em
 | **30** | **0,63** | **2.792** | **0,31** | **0,21 / 0,07 / 0,16 / 0,00 / 0,25** |
 | 40 | 0,42 | 1.029 | 0,42 | 0,21 / 0,00 / 0,12 / 0,00 / 0,24 |
 
-**Etapa 3 — efeito da morfologia** (`resultados/etapa3/`). Golden template com parâmetros
-calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre boas; A_MIN = 3.671 px
-= p95 da maior mancha que sobra em cada boa), avaliado nas 301 imagens de `classificacao`:
+**Etapa 3 — efeito da morfologia** (`resultados/etapa3/`). Golden template com o "500" e o logo
+realinhados localmente, parâmetros calibrados só nas 20 normais de `calibracao` (T = 27 = p99 da
+diferença entre boas; A_MIN = 2.450 px = p95 da maior mancha que sobra em cada boa), avaliado nas
+301 imagens de `classificacao`:
 
 | Etapa (cumulativa) | hit | FP px/boa | Boas com alarme | Precisão | Dice |
 |---|---:|---:|---:|---:|---:|
-| C0 limiar | 0,64 | 2.844 | 98% | 0,30 | 0,128 |
-| C1 + abertura 5 (Etapa 1) | 0,57 | 2.381 | 85% | 0,33 | 0,129 |
-| C2 + ROI erodida 9 px | 0,57 | 2.351 | 85% | 0,33 | 0,125 |
-| C3 + fechamento 5 | 0,57 | 2.376 | 85% | 0,33 | 0,125 |
-| C4 + preenchimento | 0,57 | 2.398 | 85% | 0,33 | 0,126 |
-| C5 + remoção de componentes < A_MIN | 0,11 | 373 | 9% | 0,57 | 0,054 |
+| C0 limiar | 0,68 | 2.416 | 99% | 0,31 | 0,155 |
+| C1 + abertura 5 | 0,65 | 1.905 | 86% | 0,34 | 0,159 |
+| C2 + ROI erodida 9 px | 0,64 | 1.832 | 86% | 0,34 | 0,155 |
+| C3 + fechamento 5 | 0,64 | 1.856 | 86% | 0,34 | 0,156 |
+| C4 + preenchimento | 0,64 | 1.913 | 86% | 0,34 | 0,155 |
+| C5 + remoção de componentes < A_MIN | 0,17 | 568 | 10% | 0,45 | 0,058 |
 
-- A abertura é a única operação que reduz falsos positivos sem custo adicional relevante; ROI
-  erodida, fechamento e preenchimento mudam pouco os números.
+Efeito do realinhamento local do "500" e do logo (máscara C4, mesmas imagens):
+
+| | hit | FP px/boa | Dice | hit *crack* | hit *faulty_imprint* | hit *scratch* |
+|---|---:|---:|---:|---:|---:|---:|
+| sem realinhamento (T = 32) | 0,57 | 2.398 | 0,126 | 0,65 | 0,59 | 0,09 |
+| **com realinhamento (T = 27)** | **0,64** | **1.913** | **0,155** | **0,83** | **0,82** | 0,00 |
+
+- O realinhamento local reduz a variação normal nas boas (o limiar calibrado cai de 32 para 27) e
+  aumenta a detecção, sobretudo de impressão falha e rachadura.
+- A abertura é a única operação morfológica que reduz falsos positivos sem custo adicional
+  relevante; ROI erodida, fechamento e preenchimento mudam pouco os números.
 - A remoção por área elimina quase todos os alarmes nas boas, mas também quase todos os defeitos:
-  as manchas falsas das cápsulas boas (impressão "500" deslocada) têm o **mesmo tamanho** dos
-  defeitos, então a área sozinha não separa as duas coisas.
-- Por isso a máscara levada para a Etapa 4 é a **C4**; separar "mancha falsa" de "defeito" fica a
-  cargo dos atributos e do classificador. (Essa escolha foi feita depois de ver a tabela e é
-  declarada aqui.)
+  as manchas falsas das cápsulas boas têm o **mesmo tamanho** dos defeitos. Por isso a máscara
+  levada para a Etapa 4 é a **C4**; separar "mancha falsa" de "defeito" fica a cargo dos atributos e
+  do classificador. (Escolha feita depois de ver a tabela e declarada aqui.)
+- Nas boas, ≈ 76% dos pixels falsos que sobram em C4 estão sobre o logo, ≈ 13% junto ao contorno e
+  só ≈ 3% sobre o "500".
 
 **Etapa 5 — classificação** (`resultados/etapa5/`):
 
-*Normal × defeituosa* (301 imagens):
+*Normal × defeituosa* (301 imagens), decisão padrão:
 
 | Grupo | SVM: acur. bal. / F1 / AUC | Random Forest: acur. bal. / F1 / AUC |
 |---|---|---|
-| forma | 0,56 / 0,43 / 0,58 | 0,59 / 0,48 / 0,66 |
-| textura | 0,61 / 0,43 / 0,62 | 0,61 / 0,49 / 0,65 |
-| posição/impressão | 0,59 / 0,44 / 0,65 | 0,68 / 0,59 / **0,76** |
-| **todos** | 0,69 / 0,58 / 0,74 | **0,70 / 0,61** / 0,76 |
+| forma | 0,59 / 0,33 / 0,64 | 0,64 / 0,53 / 0,65 |
+| textura | 0,58 / 0,45 / 0,65 | 0,59 / 0,45 / 0,63 |
+| posição/impressão | 0,66 / 0,55 / 0,69 | 0,70 / 0,60 / 0,74 |
+| **todos** | **0,70 / 0,60 / 0,75** | 0,70 / 0,60 / 0,75 |
 
-Melhor (todos + RF): 158 de 192 normais e 62 de 109 defeituosas corretas. Defeituosas
-reconhecidas por tipo: *squeeze* 20/20, *faulty_imprint* 14/22, *poke* 12/21, *crack* 10/23,
-*scratch* 6/23.
+Todos + RF: precisão 0,70, recall 0,52, especificidade 0,87 (167 de 192 boas aprovadas, 57 de 109
+defeituosas encontradas).
+
+*Normal × defeituosa*, **priorizando os defeitos** (limiar para recall ≥ 90% no treino):
+
+| Grupo | SVM: recall / especificidade | Random Forest: recall / especificidade |
+|---|---|---|
+| forma | 0,91 / 0,13 | 0,94 / 0,06 |
+| textura | 0,92 / 0,21 | 0,95 / 0,12 |
+| posição/impressão | 0,92 / 0,18 | 0,94 / 0,18 |
+| **todos** | **0,94 / 0,19** | 0,94 / 0,19 |
+
+Todos + SVM: 102 de 109 defeituosas encontradas (*crack* 21/23, *faulty_imprint* 22/22, *poke*
+19/21, *scratch* 21/23, *squeeze* 19/20), ao custo de aprovar só 37 das 192 boas (precisão 0,40).
 
 *Qual defeito* (109 defeituosas, 5 classes):
 
 | Grupo | SVM: acur. bal. / F1 macro | Random Forest: acur. bal. / F1 macro |
 |---|---|---|
-| forma | 0,46 / 0,45 | 0,43 / 0,42 |
-| textura | 0,49 / 0,47 | 0,52 / 0,51 |
-| posição/impressão | 0,47 / 0,44 | 0,49 / 0,46 |
-| **todos** | 0,49 / 0,49 | **0,53 / 0,51** |
+| forma | 0,39 / 0,39 | 0,38 / 0,38 |
+| textura | 0,53 / 0,53 | 0,45 / 0,43 |
+| posição/impressão | 0,33 / 0,34 | 0,50 / 0,49 |
+| **todos** | 0,55 / 0,54 | **0,58 / 0,57** |
 
-Acerto por tipo (todos + RF): *squeeze* 0,85, *scratch* 0,74, *faulty_imprint* 0,55, *poke* 0,29,
-*crack* 0,22.
+Acerto por tipo (todos + RF): *squeeze* 0,90, *faulty_imprint* 0,86, *crack* 0,43, *scratch* 0,43,
+*poke* 0,29.
+
+Evolução da classificação com as mudanças de localização e de ficha (melhor configuração; com
+~20 exemplos por defeito, diferenças de até ±0,05 estão dentro da variação esperada):
+
+| Versão | Normal × defeituosa (acur. bal.) | Prioriza defeitos (recall / espec.) | Qual defeito (acur. bal.) |
+|---|---:|---:|---:|
+| ficha da maior mancha, sem realinhamento | 0,70 | 0,94 / 0,29 | 0,53 |
+| + realinhamento do "500"/logo | 0,71 | 0,93 / 0,23 | 0,48 |
+| **+ mancha principal fora do "500"/logo (final)** | **0,70** | **0,94 / 0,19** | **0,58** |
 
 ## 7. Discussão e limitações
 
@@ -284,32 +339,40 @@ Acerto por tipo (todos + RF): *squeeze* 0,85, *scratch* 0,74, *faulty_imprint* 0
   mascarado pela variação normal da impressão. *scratch* é fino e de baixo contraste demais
   (Dice ≈ 0).
 - **Trade-off do limiar:** reduzir o limiar aumenta a detecção à custa de mais falsos positivos.
-- **Classificação (Etapa 5):** combinar os grupos é o que funciona melhor nas duas tarefas, e o
-  Random Forest supera o SVM na maioria dos casos. Na decisão boa × defeituosa, o grupo
-  posição/impressão sozinho já chega perto do total: os atributos do "500" (área relativa,
-  variação entre algarismos, buracos) estão entre os mais usados pelo Random Forest
-  (`importancia_atributos.png`). Para dizer **qual** defeito, a textura pesa mais.
-- **O gargalo continua sendo a localização (parte 1).** Nos falsos negativos, a Etapa 3 marcou
-  pouco (maior mancha com mediana de 557 px, contra 1.452 px nas defeituosas reconhecidas) e o
-  "500" está normal: arranhões finos e rachaduras quase não deixam rastro na ficha. Nos falsos
-  positivos, cápsulas boas ficaram com manchas grandes (mediana de 1.100 px, contra 404 px nas
-  boas reconhecidas), em geral pelo logo ou pelo "500" em posição pouco comum
-  (`exemplos_erros.png`).
+- **Classificação (Etapa 5):** combinar os grupos é o que funciona melhor nas duas tarefas. Na
+  decisão boa × defeituosa, o grupo posição/impressão sozinho já chega perto do total; para dizer
+  **qual** defeito, a textura pesa mais (`importancia_atributos.png`). Descrever a mancha mais
+  suspeita, fora do "500" e do logo, melhorou a identificação do tipo (0,53 → 0,58; rachadura
+  0,22 → 0,43; impressão falha 0,55 → 0,86).
+- **Achar defeitos custa aprovar poucas boas.** Para encontrar ≥ 90% das defeituosas, só ~19% das
+  boas são aprovadas: mesmo depois do realinhamento, ≈ 75% das cápsulas boas ainda têm alguma
+  mancha suspeita fora do "500" e do logo (contorno, reflexos, logo parcialmente visível), parecida
+  com as manchas pequenas de arranhões e rachaduras. A melhora na localização (hit 0,57 → 0,64) não
+  se converteu em melhor decisão boa × defeituosa (≈ 0,70 em todas as versões).
+- **O gargalo continua sendo a localização (parte 1):** a decisão final depende de a variação
+  normal das cápsulas boas não gerar manchas parecidas com defeitos. Exemplos de erro em
+  `exemplos_erros.png` e `erros_binaria.csv`.
 - **Morfologia (Etapa 3):** só a abertura reduz falsos positivos de forma útil. Filtrar por área não
   funciona, porque as manchas falsas da impressão têm o tamanho dos defeitos. A ROI erodida também
   corta parte de defeitos que ficam na borda da cápsula (*squeeze*).
 
 **Limitações metodológicas:**
 1. Na Etapa 1, os parâmetros das bordas e as tabelas de sensibilidade foram avaliados no próprio
-   `test/`. A partir da Etapa 2 isso foi corrigido com a partição própria; a única escolha feita
-   depois de ver resultados (usar C4 em vez de C5) está declarada na seção 6.
-2. Uma única referência por imagem não tolera a variação normal entre cápsulas boas.
+   `test/`. A partir da Etapa 2 isso foi corrigido com a partição própria.
+2. **Escolhas feitas depois de ver resultados no conjunto `classificacao`** (declaradas): usar C4
+   em vez de C5; acrescentar o realinhamento do "500"/logo; e descrever a mancha principal fora do
+   "500"/logo. As duas últimas foram motivadas por diagnósticos (onde estavam os pixels falsos), e
+   cada uma foi rodada uma única vez; ainda assim, os números finais podem estar levemente
+   otimistas.
+3. Uma única referência por imagem não tolera toda a variação normal entre cápsulas boas (logo
+   parcialmente visível, reflexos, contorno).
 
 ## 8. Próximos passos
 
 1. ~~Partição própria~~ (Etapa 2, feita).
 2. ~~Morfologia completa, quantificando o efeito sobre os falsos positivos~~ (Etapa 3, feita).
-3. **Localização:** tornar a referência tolerante à variação normal entre cápsulas boas.
+3. ~~Localização: tolerar a variação do "500" e do logo~~ (realinhamento local, feito). Ainda
+   falta tratar contorno e reflexos, que geram as manchas falsas restantes.
 4. ~~Atributos da região segmentada~~ (Etapa 4, feita; textura por estatísticas do histograma e
    LBP, sem GLCM, que não foi vista em aula).
 5. ~~Classificação com SVM e Random Forest, por grupo de atributos~~ (Etapa 5, feita).
@@ -356,7 +419,7 @@ pdi-mvtec-capsule/
 │   ├── avaliar.py          Etapa 1: avaliação nas 132 imagens de test/
 │   ├── particao.py         Etapa 2: partição própria (banco / calibração / classificação)
 │   ├── segmentacao.py      Etapa 3: máscara final (golden template + morfologia)
-│   ├── impressao.py        Etapa 4: segmentação do "500" pelo histograma
+│   ├── impressao.py        "500" e logo pelo histograma + realinhamento local (Etapas 3–4)
 │   ├── atributos.py        Etapa 4: ficha de atributos de cada cápsula
 │   └── classificacao.py    Etapa 5: SVM e Random Forest com validação cruzada
 ├── dados/
