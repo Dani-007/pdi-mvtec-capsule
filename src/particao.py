@@ -84,7 +84,8 @@ def main() -> None:
     linhas = montar_particao()
     SAIDA.parent.mkdir(exist_ok=True)
     with open(SAIDA, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["arquivo", "tipo", "rotulo", "conjunto", "fold"])
+        w = csv.DictWriter(f, fieldnames=["arquivo", "tipo", "rotulo", "conjunto", "fold"],
+                           lineterminator="\n")
         w.writeheader()
         w.writerows(linhas)
 

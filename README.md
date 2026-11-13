@@ -10,7 +10,7 @@ Disciplina de Processamento Digital de Imagens — UFSCar · Prof. Dr. Ricardo J
 1. [Contexto e objetivo](#1-contexto-e-objetivo)
 2. [Dados e escopo](#2-dados-e-escopo)
 3. [Andamento](#3-andamento)
-4. [Pipeline (Etapas 1–4)](#4-pipeline-etapas-14)
+4. [Pipeline (Etapas 1–5)](#4-pipeline-etapas-15)
 5. [Avaliação](#5-avaliação)
 6. [Resultados](#6-resultados)
 7. [Discussão e limitações](#7-discussão-e-limitações)
@@ -70,9 +70,10 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 | **2** | Partição própria (`src/particao.py`) | ✅ concluída |
 | **3** | Máscara final: golden template + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
 | **4** | Atributos: ficha de cada cápsula, com a impressão "500" segmentada pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
-| **5–6** | Classificação e resultados finais | ⏳ próximos passos |
+| **5** | Classificação: SVM × Random Forest, por grupo de atributos (`src/classificacao.py`) | ✅ concluída |
+| **6** | Discussão final e relatório | ⏳ próximo passo |
 
-## 4. Pipeline (Etapas 1–4)
+## 4. Pipeline (Etapas 1–5)
 
 ### 4.1 Pré-processamento
 | Passo | Técnica | Justificativa |
@@ -160,6 +161,21 @@ Distribuições por tipo em `resultados/etapa4/atributos_por_tipo.png`: a área 
 buracos do "500" destacam a impressão falha; área, compacidade, diferença ao modelo e distância ao
 contorno destacam o *squeeze*.
 
+### 4.8 Etapa 5 — classificação (`src/classificacao.py` → `resultados/etapa5/`)
+
+Duas tarefas em sequência, como numa linha de inspeção:
+- **binária:** normal × defeituosa, nas 301 imagens de `classificacao`;
+- **defeitos:** qual dos 5 defeitos, só nas 109 defeituosas.
+
+Para cada tarefa, comparam-se os grupos de atributos (forma, textura, posição/impressão e todos)
+e dois classificadores: **SVM** (núcleo RBF, atributos padronizados por z-score) e **Random
+Forest** (300 árvores). Classes desbalanceadas são tratadas com `class_weight='balanced'`.
+
+**Protocolo sem vazamento:** validação cruzada com a coluna `fold` da partição (5 rodadas: treina em
+4 folds, testa no 5º), de modo que cada imagem é testada uma vez por um modelo que não a viu. A
+padronização e a escolha de hiperparâmetros (busca em grade com validação interna de 3 partes;
+SVM: C e γ; RF: profundidade e folhas mínimas) usam **só o treino de cada rodada**.
+
 ## 5. Avaliação
 
 Pixel a pixel contra o ground truth. Etapa 1: as 132 imagens de `test/` (109 defeituosas + 23
@@ -175,6 +191,15 @@ boas). Etapa 3: as 301 imagens do conjunto `classificacao` (109 defeituosas + 19
 
 Para mapas de borda, o Dice é baixo por natureza (a borda tem 1–3 px e o GT é a região inteira).
 Nesse caso, o indicador principal é o número de falsos positivos.
+
+**Classificação (Etapa 5)**, por imagem, com as previsões das 5 rodadas da validação cruzada:
+
+| Métrica | Significado |
+|---|---|
+| **Acurácia balanceada** | média do acerto de cada classe (não favorece a classe maior); acaso = 0,50 na binária e 0,20 nos 5 defeitos |
+| **F1** | equilíbrio entre precisão e recall (binária: classe defeituosa; defeitos: média macro) |
+| **ROC-AUC** | (binária) chance de uma defeituosa receber pontuação maior que uma normal |
+| **Matriz de confusão** | quantas imagens de cada classe foram previstas como cada classe |
 
 ## 6. Resultados
 
@@ -220,6 +245,33 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
   cargo dos atributos e do classificador. (Essa escolha foi feita depois de ver a tabela e é
   declarada aqui.)
 
+**Etapa 5 — classificação** (`resultados/etapa5/`):
+
+*Normal × defeituosa* (301 imagens):
+
+| Grupo | SVM: acur. bal. / F1 / AUC | Random Forest: acur. bal. / F1 / AUC |
+|---|---|---|
+| forma | 0,56 / 0,43 / 0,58 | 0,59 / 0,48 / 0,66 |
+| textura | 0,61 / 0,43 / 0,62 | 0,61 / 0,49 / 0,65 |
+| posição/impressão | 0,59 / 0,44 / 0,65 | 0,68 / 0,59 / **0,76** |
+| **todos** | 0,69 / 0,58 / 0,74 | **0,70 / 0,61** / 0,76 |
+
+Melhor (todos + RF): 158 de 192 normais e 62 de 109 defeituosas corretas. Defeituosas
+reconhecidas por tipo: *squeeze* 20/20, *faulty_imprint* 14/22, *poke* 12/21, *crack* 10/23,
+*scratch* 6/23.
+
+*Qual defeito* (109 defeituosas, 5 classes):
+
+| Grupo | SVM: acur. bal. / F1 macro | Random Forest: acur. bal. / F1 macro |
+|---|---|---|
+| forma | 0,46 / 0,45 | 0,43 / 0,42 |
+| textura | 0,49 / 0,47 | 0,52 / 0,51 |
+| posição/impressão | 0,47 / 0,44 | 0,49 / 0,46 |
+| **todos** | 0,49 / 0,49 | **0,53 / 0,51** |
+
+Acerto por tipo (todos + RF): *squeeze* 0,85, *scratch* 0,74, *faulty_imprint* 0,55, *poke* 0,29,
+*crack* 0,22.
+
 ## 7. Discussão e limitações
 
 - **Bordas não separam defeito de estrutura normal.** A cápsula sem defeito já tem muitas bordas
@@ -232,6 +284,17 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
   mascarado pela variação normal da impressão. *scratch* é fino e de baixo contraste demais
   (Dice ≈ 0).
 - **Trade-off do limiar:** reduzir o limiar aumenta a detecção à custa de mais falsos positivos.
+- **Classificação (Etapa 5):** combinar os grupos é o que funciona melhor nas duas tarefas, e o
+  Random Forest supera o SVM na maioria dos casos. Na decisão boa × defeituosa, o grupo
+  posição/impressão sozinho já chega perto do total: os atributos do "500" (área relativa,
+  variação entre algarismos, buracos) estão entre os mais usados pelo Random Forest
+  (`importancia_atributos.png`). Para dizer **qual** defeito, a textura pesa mais.
+- **O gargalo continua sendo a localização (parte 1).** Nos falsos negativos, a Etapa 3 marcou
+  pouco (maior mancha com mediana de 557 px, contra 1.452 px nas defeituosas reconhecidas) e o
+  "500" está normal: arranhões finos e rachaduras quase não deixam rastro na ficha. Nos falsos
+  positivos, cápsulas boas ficaram com manchas grandes (mediana de 1.100 px, contra 404 px nas
+  boas reconhecidas), em geral pelo logo ou pelo "500" em posição pouco comum
+  (`exemplos_erros.png`).
 - **Morfologia (Etapa 3):** só a abertura reduz falsos positivos de forma útil. Filtrar por área não
   funciona, porque as manchas falsas da impressão têm o tamanho dos defeitos. A ROI erodida também
   corta parte de defeitos que ficam na borda da cápsula (*squeeze*).
@@ -249,20 +312,15 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
 3. **Localização:** tornar a referência tolerante à variação normal entre cápsulas boas.
 4. ~~Atributos da região segmentada~~ (Etapa 4, feita; textura por estatísticas do histograma e
    LBP, sem GLCM, que não foi vista em aula).
-5. **Classificação** normal/defeituoso e por tipo, com **SVM e Random Forest**, comparando atributos
-   geométricos, de textura e a combinação completa.
-6. **Métricas finais:**
-   - F1, balanced accuracy e ROC-AUC;
-   - resultados por tipo de defeito;
-   - exemplos de falsos positivos e falsos negativos;
-   - discussão das etapas que mais limitam o desempenho.
+5. ~~Classificação com SVM e Random Forest, por grupo de atributos~~ (Etapa 5, feita).
+6. **Relatório final:** consolidar resultados, exemplos de erro e a resposta à questão de projeto.
 
 ## 9. Como executar
 
 1. Baixe a categoria **capsule** do MVTec AD e extraia em `capsule/`, na raiz do repositório.
 2. Instale as dependências:
    ```
-   pip install -r requirements.txt     # opencv-python, numpy, matplotlib
+   pip install -r requirements.txt     # opencv-python, numpy, matplotlib, scikit-learn
    ```
 3. Rode os scripts **a partir da raiz do repositório**:
    ```
@@ -280,6 +338,9 @@ calibrados só nas 20 normais de `calibracao` (T = 32 = p99 da diferença entre 
    # Etapa 4
    python src/impressao.py                               # figura de diagnóstico do "500"
    python src/atributos.py                               # ~1 min -> dados/atributos.csv
+
+   # Etapa 5
+   python src/classificacao.py                           # ~6 min -> resultados/etapa5/
    ```
 
 ## 10. Estrutura do repositório
@@ -296,7 +357,8 @@ pdi-mvtec-capsule/
 │   ├── particao.py         Etapa 2: partição própria (banco / calibração / classificação)
 │   ├── segmentacao.py      Etapa 3: máscara final (golden template + morfologia)
 │   ├── impressao.py        Etapa 4: segmentação do "500" pelo histograma
-│   └── atributos.py        Etapa 4: ficha de atributos de cada cápsula
+│   ├── atributos.py        Etapa 4: ficha de atributos de cada cápsula
+│   └── classificacao.py    Etapa 5: SVM e Random Forest com validação cruzada
 ├── dados/
 │   ├── particao.csv        partição gerada (semente fixa)
 │   ├── atributos.csv       fichas de atributos (Etapa 4)
@@ -304,6 +366,7 @@ pdi-mvtec-capsule/
 ├── resultados/
 │   ├── etapa1/             tabelas (avaliacao.txt) e exemplos de bordas e golden template
 │   ├── etapa3/             tabela da morfologia e exemplos passo a passo
-│   └── etapa4/             impressão "500" e distribuição dos atributos por tipo
+│   ├── etapa4/             impressão "500" e distribuição dos atributos por tipo
+│   └── etapa5/             tabelas, matrizes de confusão, importância dos atributos e erros
 └── capsule/                dataset MVTec AD (não versionado)
 ```

@@ -1,0 +1,6 @@
+Acerto por tipo (melhor configuração):
+  crack           0.22
+  faulty_imprint  0.55
+  poke            0.29
+  scratch         0.74
+  squeeze         0.85

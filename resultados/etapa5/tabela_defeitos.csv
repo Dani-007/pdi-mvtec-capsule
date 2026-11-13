@@ -1,0 +1,9 @@
+grupo,classificador,acuracia_balanceada,f1_macro
+forma,SVM,0.4564,0.4518
+forma,RandomForest,0.4303,0.4207
+textura,SVM,0.4851,0.4682
+textura,RandomForest,0.5231,0.514
+posicao_impressao,SVM,0.4669,0.4382
+posicao_impressao,RandomForest,0.4868,0.4605
+todos,SVM,0.4893,0.4879
+todos,RandomForest,0.5275,0.5131
