@@ -1,0 +1,35 @@
+Candidatos por defeito: defeito-alvo x cápsulas boas de 'classificacao'
+achadas = fração do defeito-alvo acima do percentil 98 das boas de treino (5 folds)
+* = método escolhido (especialistas.py)
+
+AMASSADO (squeeze, 20 cápsulas)                                    AUC   achadas
+    método único: maior mancha do golden template (Etapas 3-4)   0.992      0.95
+    descritores globais da silhueta (maior z-score)              0.993      0.95
+    XOR com a silhueta boa mais parecida, sem abertura           1.000      1.00
+  * XOR com a silhueta boa mais parecida + abertura 7            1.000      1.00
+
+IMPRESSÃO FALHA (faulty_imprint, 22 cápsulas)                      AUC   achadas
+    método único: maior mancha do golden template (Etapas 3-4)   0.666      0.05
+    desvio da área do "500" (atributo da Etapa 4)                0.817      0.36
+    correlação do "500" inteiro com o melhor modelo              0.999      0.95
+  * correlação do pior algarismo com o melhor modelo             1.000      1.00
+
+RACHADURA (crack, 23 cápsulas)                                     AUC   achadas
+    método único: maior mancha do golden template (Etapas 3-4)   0.726      0.26
+    forma da tampa preta, Otsu no cinza                          0.636      0.13
+  * forma da tampa preta, Otsu no a* (Lab)                       0.773      0.52
+    contraste local 15 px (o especialista do furinho)            0.935      0.57
+
+FURINHO (poke, 21 cápsulas)                                        AUC   achadas
+    método único: maior mancha do golden template (Etapas 3-4)   0.562      0.05
+    top-hat/black-hat 15 px, sem envelope                        0.751      0.00
+    top-hat/black-hat 25 px, acima do envelope                   0.906      0.57
+  * top-hat/black-hat 15 px, acima do envelope                   0.967      0.62
+
+ARRANHÃO (scratch, 23 cápsulas)                                    AUC   achadas
+    método único: maior mancha do golden template (Etapas 3-4)   0.492      0.00
+    pixels de borda do Canny (Etapa 1)                           0.526      0.04
+    maior risco (top-hat 9 px), sem envelope                     0.760      0.09
+    maior risco (top-hat 9 px), acima do envelope                0.961      0.61
+    concentração de fragmentos, sem envelope                     0.934      0.30
+  * concentração de fragmentos, acima do envelope                0.983      0.87

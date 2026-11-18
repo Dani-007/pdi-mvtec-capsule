@@ -1,0 +1,15 @@
+Ablação: cascata sem cada etapa (ALFA = 0.02) e cada etapa sozinha
+
+configuração                espec.  recall  ac.bal.      crack  faulty_     poke  scratch  squeeze
+cascata completa             0.964   0.899    0.931       0.83     1.00     0.86     0.83     1.00
+sem amassado                 0.964   0.872    0.918       0.78     1.00     0.86     0.83     0.90
+sem impressão falha          0.969   0.798    0.883       0.83     0.68     0.67     0.83     1.00
+sem rachadura                0.964   0.853    0.908       0.61     1.00     0.86     0.83     1.00
+sem furinho                  0.969   0.899    0.934       0.83     1.00     0.86     0.83     1.00
+sem arranhão                 0.979   0.798    0.889       0.83     0.95     0.86     0.39     1.00
+
+só amassado                  1.000   0.211    0.606       0.13     0.00     0.00     0.00     1.00
+só impressão falha           0.995   0.367    0.681       0.04     0.95     0.43     0.09     0.35
+só rachadura                 1.000   0.312    0.656       0.52     0.00     0.19     0.00     0.90
+só furinho                   0.984   0.413    0.699       0.52     0.41     0.57     0.35     0.20
+só arranhão                  0.974   0.596    0.785       0.52     0.68     0.57     0.83     0.35

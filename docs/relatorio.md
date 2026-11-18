@@ -17,17 +17,29 @@ positivos, descrevemos a mancha mais suspeita de cada cápsula por 30 atributos 
 posição/impressão) e classificamos com SVM e Random Forest em validação cruzada de 5 folds, sem
 escolher parâmetros no conjunto de avaliação.
 
-Resultados principais:
+Resultados do método único (Etapas 1–5):
 - a localização encontra **64%** das cápsulas defeituosas (Dice médio 0,155);
 - a decisão normal × defeituosa atinge acurácia balanceada **0,70** (ROC-AUC 0,75);
 - priorizando os defeitos, **94%** das defeituosas são encontradas, mas só 19% das boas são
   aprovadas;
 - o tipo de defeito é identificado com acurácia balanceada **0,58** (acaso: 0,20).
 
-A resposta à questão de projeto é **parcialmente sim**: defeitos grandes ou que alteram a impressão
-são bem tratados, mas a localização é o gargalo. Arranhões finos quase não geram mancha, e a
-variação natural da cápsula boa (rotação do logo, reflexos, contorno) gera manchas parecidas com
-defeitos pequenos.
+Por orientação do professor, trocamos então o método único por **um método especialista para cada
+defeito**, em cascata (Etapa 7): a cápsula passa por 5 etapas (amassado, impressão falha,
+rachadura, furinho, arranhão) e só é aprovada se nenhuma acusar. Resultados da cascata, com os
+limiares de decisão definidos só no treino de cada fold:
+- **90%** das defeituosas encontradas com **96%** das boas aprovadas (acurácia balanceada
+  **0,93**, ROC-AUC 0,98);
+- priorizando os defeitos, **94%** das defeituosas com **90%** das boas aprovadas (antes: 19%);
+- todas as cápsulas amassadas e com impressão falha são encontradas; o arranhão, que o método
+  único não via (AUC 0,49), passa a ser separado das boas com AUC 0,98;
+- a localização acerta **86%** das defeituosas (Dice 0,30).
+
+A resposta à questão de projeto passa a ser **sim para detectar** e **parcialmente para dizer o
+tipo**: cada defeito deixa uma marca diferente na imagem, e procurar cada marca com o método certo
+funciona muito melhor que um método único. O que ainda limita é separar rachadura, furinho e
+arranhão entre si (tipo apontado com acurácia balanceada 0,63) e a variação normal que restou
+(logo cortado junto à borda).
 
 ## 1. Problema e questão de projeto
 
@@ -64,12 +76,20 @@ impressão "500" e o logo "actavis", sobre fundo claro.
 
 Regra adotada: **quem ajusta não dá nota**. Nenhum limiar ou tamanho é escolhido olhando o conjunto
 `classificacao`, e os hiperparâmetros dos classificadores são ajustados só no treino de cada rodada.
+Na Etapa 7, o `banco` fornece as referências dos especialistas e os limiares de decisão seguem a
+mesma regra (treino de cada rodada); o desenho dos especialistas é a exceção, declarada na seção 8.
 
 ## 3. Pipeline
 
+Método único (Etapas 1–5):
 ```
 imagem → cinza + bilateral → cápsula (Otsu) → golden template + realinhamento do "500"/logo
        → limiar calibrado → morfologia → manchas → ficha de 30 atributos → SVM / Random Forest
+```
+Cascata de especialistas (Etapa 7, seção 3.8):
+```
+imagem → 1. amassado → 2. impressão falha → 3. rachadura → 4. furinho → 5. arranhão → BOA
+         (qualquer etapa que acuse encerra: DEFEITUOSA)
 ```
 
 ### 3.1 Pré-processamento e região de interesse
@@ -137,6 +157,42 @@ em três grupos:
 - **Ponto de operação "prioriza defeitos":** o limiar sobre a pontuação "defeituosa" é escolhido no
   treino de cada fold como o maior que ainda encontra ≥ 90% das defeituosas do treino.
 
+### 3.8 Cascata de especialistas, um método por defeito (Etapa 7)
+
+**Motivação.** O método único mede "diferença em relação a uma cápsula boa" e trata todo defeito
+como uma mancha. Mas cada defeito deixa uma marca própria, e algumas delas quase não geram mancha
+(arranhão) ou se confundem com a variação normal (impressão). A orientação do professor foi usar
+um método para cada defeito, como já tinha sido feito com o "500", e aprovar a cápsula só se ela
+passar por todos (`src/especialistas.py`, `src/cascata.py`).
+
+Cada especialista devolve um número (quanto maior, mais suspeita) e a máscara do que acusou:
+
+| # | Defeito | Marca na imagem | Método | Valor |
+|---|---|---|---|---|
+| 1 | amassado (*squeeze*) | a silhueta muda | máscara da cápsula (Otsu) × silhueta boa mais parecida: XOR + abertura 7×7 | área da maior região que sobra |
+| 2 | impressão falha | o "500" muda | cada algarismo casado com o de cápsulas boas por correlação normalizada (*template matching*) | 1 − correlação do pior algarismo |
+| 3 | rachadura (*crack*) | a tampa preta lasca e mostra o laranja, ou sai pó branco | segmentação preto × laranja pela cor (Otsu no a\* do Lab); tampa × tampa boa mais parecida, fora do "500": XOR + abertura 9×9 | área da maior região que sobra |
+| 4 | furinho (*poke*) | mancha compacta com contraste local | *top-hat* e *black-hat* de 15 px acima do envelope, limiar 6, fechamento 5 + abertura 3 | área da maior mancha |
+| 5 | arranhão (*scratch*) | feixe de riscos finos e claros (3–10 níveis) | *top-hat* de 9 px acima do envelope, limiar 3, sem o bilateral | pixels de fragmentos na janela 101×101 mais cheia |
+
+- **Envelope das cápsulas boas** (especialistas 4 e 5). A cápsula boa também tem estruturas finas
+  (linha de reflexo no meio, marca do molde, linhas internas), sempre no mesmo lugar. O envelope é
+  o máximo do *top-hat* nas 30 boas do banco, dilatado 9 px para tolerar a posição; só o que passa
+  dele conta.
+- **Zona válida.** O que muda de lugar fica fora da busca dos especialistas 4 e 5: faixa de 13 px
+  do contorno, o "500" dilatado (assunto do especialista 2), a divisa preto/laranja e o logo. O
+  logo é segmentado como uma cadeia horizontal comprida de componentes claros (fechamento 45×15,
+  largura ≥ 100 px), o que não apaga um furinho isolado na tampa preta.
+- **Alinhamento.** A pose é estável na base (centro ±3 px, ângulo ±0,3°, tampa preta sempre à
+  esquerda), então basta uma translação pelo centroide. A cascata não usa ECC.
+- **Limiar de cada etapa**, definido só no treino: `a` = percentil (1 − ALFA) do valor nas boas
+  (alarme falso aceito pela etapa); o limiar é o ponto médio entre `a` e o menor valor, acima de
+  `a`, entre os defeitos-alvo. ALFA é o ponto de operação: 2% (padrão) ou 5% (prioriza defeitos).
+- **Protocolo.** Referências: 30 boas do `banco`. Limiares: validação cruzada com os 5 folds
+  (treino = 20 boas de `calibracao` + 4 folds; decisão no 5º).
+- **Tipo apontado:** a primeira etapa que acusa, na ordem do mais específico (amassado, impressão)
+  para o mais geral (furinho, arranhão).
+
 ## 4. Experimentos realizados (enunciado × onde está)
 
 | Experimento mínimo | Onde |
@@ -150,6 +206,7 @@ em três grupos:
 | Classificação: F1, acurácia balanceada, ROC-AUC | 5.4 |
 | Exemplos de falsos positivos e falsos negativos | 6 |
 | Etapas que mais limitam o desempenho | 7 |
+| Um método por defeito (orientação do professor): candidatos, cascata, ablação | 5.5 |
 
 A extensão opcional (atributos só da região defeituosa × atributos globais) não foi realizada.
 
@@ -266,6 +323,96 @@ Acerto por tipo (todos + RF): *squeeze* 0,90, *faulty_imprint* 0,86, *crack* 0,4
 - **SVM × Random Forest:** desempenho equivalente na decisão normal × defeituosa; o Random Forest é
   melhor para o tipo de defeito.
 
+### 5.5 Cascata de especialistas (Etapa 7)
+
+**Qual método para cada defeito** (`src/comparar_candidatos.py` →
+`resultados/etapa7/tabela_candidatos.txt`). AUC do defeito-alvo contra as boas; "achadas" é a
+fração do defeito-alvo acima do percentil 98 das boas de treino (5 folds):
+
+| Defeito | Método | AUC | Achadas |
+|---|---|---:|---:|
+| amassado | método único (maior mancha do golden template) | 0,992 | 0,95 |
+| | descritores globais da silhueta | 0,993 | 0,95 |
+| | **XOR com a silhueta boa mais parecida + abertura** | **1,000** | **1,00** |
+| impressão falha | método único | 0,666 | 0,05 |
+| | desvio da área do "500" (Etapa 4) | 0,817 | 0,36 |
+| | correlação do "500" inteiro | 0,999 | 0,95 |
+| | **correlação do pior algarismo** | **1,000** | **1,00** |
+| rachadura | método único | 0,726 | 0,26 |
+| | forma da tampa preta, Otsu no cinza | 0,636 | 0,13 |
+| | **forma da tampa preta, Otsu no a\*** | **0,773** | **0,52** |
+| | contraste local 15 px (especialista do furinho) | 0,935 | 0,57 |
+| furinho | método único | 0,562 | 0,05 |
+| | top-hat/black-hat 15 px, sem envelope | 0,751 | 0,00 |
+| | top-hat/black-hat 25 px, acima do envelope | 0,906 | 0,57 |
+| | **top-hat/black-hat 15 px, acima do envelope** | **0,967** | **0,62** |
+| arranhão | método único | 0,492 | 0,00 |
+| | pixels de borda do Canny (Etapa 1) | 0,526 | 0,04 |
+| | maior risco (top-hat 9 px), acima do envelope | 0,961 | 0,61 |
+| | concentração de fragmentos, sem envelope | 0,934 | 0,30 |
+| | **concentração de fragmentos, acima do envelope** | **0,983** | **0,87** |
+
+- O envelope é decisivo: o mesmo top-hat sem ele acha 0% dos furinhos e 30% dos arranhões.
+- No arranhão, o risco sai picotado pelo limiar baixo; a concentração de fragmentos diz mais que
+  o maior pedaço.
+- Na rachadura, o contraste local tem AUC maior, mas ele já é a etapa 4. A forma da tampa foi
+  mantida como etapa 3 porque acha as lascas, que quase não têm contraste local.
+
+**Normal × defeituosa** (`tabela_cascata.txt`; 301 imagens, 5 folds):
+
+| ALFA | Boas aprovadas | Defeituosas encontradas | Acur. bal. | Precisão | crack / imprint / poke / scratch / squeeze |
+|---|---:|---:|---:|---:|---|
+| 1% | 0,98 | 0,88 | 0,93 | 0,96 | 0,83 / 0,95 / 0,86 / 0,78 / 1,00 |
+| **2% (padrão)** | **0,96** (185/192) | **0,90** (98/109) | **0,93** | **0,93** | 0,83 / 1,00 / 0,86 / 0,83 / 1,00 |
+| 3% | 0,94 | 0,93 | 0,93 | 0,89 | 0,87 / 1,00 / 0,90 / 0,87 / 1,00 |
+| **5% (prioriza defeitos)** | **0,90** | **0,94** (103/109) | **0,92** | 0,84 | 0,96 / 1,00 / 0,90 / 0,87 / 1,00 |
+| 8% | 0,86 | 0,98 | 0,92 | 0,80 | 1,00 / 1,00 / 0,95 / 0,96 / 1,00 |
+
+ROC-AUC da cascata: 0,98 (método único: 0,75).
+
+![Cascata × método único](../resultados/etapa7/ponto_de_operacao.png)
+
+![Encontradas por tipo](../resultados/etapa7/encontradas_por_tipo.png)
+
+**Que etapa acusa cada tipo** (ALFA = 2%):
+
+![Etapa × tipo](../resultados/etapa7/disparos_por_tipo.png)
+
+- Amassado e impressão são específicos: quase só acusam o próprio defeito (a impressão também
+  acusa furinhos e arranhões que caem sobre o "500").
+- Furinho e arranhão medem contraste local e reagem a quase todos os defeitos.
+- **Tipo apontado** (primeira etapa que acusa): acurácia balanceada **0,63** nas 5 classes,
+  contando defeituosa não achada como erro. Por tipo: amassado 1,00, impressão falha 0,95,
+  rachadura 0,43, arranhão 0,43, furinho 0,33.
+
+**Ablação** (`ablacao.txt`, ALFA = 2%):
+
+| Configuração | Boas aprovadas | Defeituosas encontradas | O que se perde |
+|---|---:|---:|---|
+| cascata completa | 0,96 | 0,90 | — |
+| sem amassado | 0,96 | 0,87 | 2 amassados e 1 rachadura |
+| sem impressão falha | 0,97 | 0,80 | 7 impressões falhas e 4 furinhos |
+| sem rachadura | 0,96 | 0,85 | 5 rachaduras |
+| sem furinho | 0,97 | 0,90 | nenhuma cápsula |
+| sem arranhão | 0,98 | 0,80 | 10 arranhões e 1 impressão falha |
+
+O especialista do furinho é redundante neste ponto de operação: os furinhos que ele acha também
+são achados pelos do arranhão e da impressão.
+
+**Localização** (`localizacao.txt`; união das máscaras das etapas que acusaram × ground truth):
+
+| | hit | Precisão | Dice | FP px/boa | Boas com pixel marcado |
+|---|---:|---:|---:|---:|---:|
+| método único (C4, Etapa 3) | 0,64 | 0,34 | 0,155 | 1.913 | 86% |
+| **cascata (ALFA = 2%)** | **0,86** | **0,53** | **0,295** | **20** | **4%** |
+
+Por tipo (hit / Dice): rachadura 0,83 / 0,37; impressão falha 0,95 / 0,33; furinho 0,71 / 0,31;
+arranhão 0,83 / 0,20; amassado 1,00 / 0,26.
+
+![Passo a passo: rachadura](../resultados/etapa7/exemplo_crack_test_010.png)
+
+![Passo a passo: arranhão](../resultados/etapa7/exemplo_scratch_test_009.png)
+
 ## 6. Exemplos de erros
 
 ![Falsos positivos e falsos negativos (prioriza defeitos)](../resultados/etapa5/exemplos_erros.png)
@@ -278,7 +425,22 @@ Acerto por tipo (todos + RF): *squeeze* 0,90, *faulty_imprint* 0,86, *crack* 0,4
   pela ROI erodida.
 - A lista completa de erros está em `resultados/etapa5/erros_binaria.csv`.
 
+**Cascata (Etapa 7, ALFA = 2%)**: 7 boas rejeitadas e 11 defeituosas aprovadas
+(`resultados/etapa7/erros.csv`).
+
+![Falso positivo da cascata](../resultados/etapa7/erro_falso_positivo_good_train_064.png)
+
+![Falso negativo da cascata](../resultados/etapa7/erro_falso_negativo_crack_test_016.png)
+
+- **Falsos positivos:** nos casos conferidos (`train/good/064` e `084`), o logo aparece **cortado
+  junto à borda**; a regra da cadeia comprida não o reconhece e ele é acusado como furinho ou
+  arranhão.
+- **Falsos negativos:** 4 rachaduras, 4 arranhões e 3 furinhos de baixo contraste, ou junto à
+  divisa e ao contorno, que ficam fora da zona válida.
+
 ## 7. Discussão: o que mais limita o desempenho
+
+Os itens 1 a 5 referem-se ao método único (Etapas 1–5); o item 6, à cascata.
 
 1. **Localização (parte 1) é o gargalo principal.** A classificação só reconhece o que a localização
    marcou. Melhorar a localização (hit 0,57 → 0,64) aumentou o acerto do tipo (0,53 → 0,58), mas não
@@ -295,6 +457,14 @@ Acerto por tipo (todos + RF): *squeeze* 0,90, *faulty_imprint* 0,86, *crack* 0,4
    decisão padrão, aprova-se 87% das boas, mas só metade dos defeitos é encontrada.
 5. **Poucos exemplos por classe** (~20 por defeito): diferenças de até ±0,05 entre configurações
    estão dentro da variação esperada.
+6. **Cascata de especialistas (Etapa 7).** Procurar a marca de cada defeito com um método próprio
+   remove o gargalo da localização: a acurácia balanceada vai de 0,70 para 0,93, e o arranhão
+   deixa de ser invisível. O que passa a limitar é:
+   - **dizer o tipo:** furinho e arranhão medem contraste local e reagem a quase todos os
+     defeitos; rachadura, furinho e arranhão se confundem (tipo apontado: 0,63);
+   - **defeitos de baixo contraste** e os que ficam junto à divisa ou ao contorno (fora da zona
+     válida);
+   - **o logo cortado junto à borda**, que continua sendo a variação normal mais difícil.
 
 ## 8. Limitações e escolhas declaradas
 
@@ -309,24 +479,36 @@ Acerto por tipo (todos + RF): *squeeze* 0,90, *faulty_imprint* 0,86, *crack* 0,4
 
   As duas últimas foram motivadas por diagnóstico (onde estavam os pixels falsos). Ainda assim, os
   números finais podem estar levemente otimistas.
+- **Etapa 7: os especialistas foram desenhados olhando as imagens de `classificacao`**, porque
+  todas as defeituosas estão nesse conjunto: a marca procurada em cada defeito, as zonas excluídas
+  (incluindo tirar o "500" da comparação da tampa, feito depois de ver 3 alarmes falsos), os
+  tamanhos dos elementos estruturantes e os limiares internos (6 e 3 níveis, janela de 101 px). Só
+  os limiares de decisão das etapas são definidos em validação cruzada. Os números da Etapa 7 são,
+  portanto, otimistas; uma estimativa isenta exigiria cápsulas novas.
+- A Etapa 7 supõe a pose da base (tampa preta à esquerda, cápsula horizontal e centrada).
 - **GLCM** (citada no enunciado) não foi usada, porque não foi vista em aula. A textura é descrita
   por estatísticas do histograma e LBP.
 - Avaliação **didática**, em partição própria; não é benchmark oficial do MVTec AD.
 
 ## 9. Conclusão
 
-É possível detectar e classificar **parte** dos defeitos de cápsulas apenas com processamento
-clássico e atributos interpretáveis:
-- defeitos grandes ou que alteram a impressão (*squeeze*, *faulty_imprint*) são localizados e
-  identificados com acerto de 86% a 90%;
-- priorizando os defeitos, o sistema encontra 94% das cápsulas defeituosas.
+É possível **detectar** defeitos de cápsulas apenas com processamento clássico, desde que cada
+defeito seja procurado pela marca que deixa na imagem:
+- com um **método único** (golden template + atributos + classificador), a decisão normal ×
+  defeituosa ficou em 0,70 de acurácia balanceada, e achar 94% dos defeitos custava rejeitar 81%
+  das boas;
+- com a **cascata de especialistas** (silhueta, correlação dos algarismos, cor da tampa, contraste
+  local e riscos finos), a acurácia balanceada chega a 0,93: 90% das defeituosas encontradas com
+  96% das boas aprovadas, ou 94% com 90%;
+- amassado e impressão falha são encontrados em todas as cápsulas; rachadura, furinho e arranhão,
+  em 83% a 86%.
 
-O limite está na **localização**: a variação natural da cápsula boa (rotação do logo, reflexos,
-contorno) produz manchas tão grandes quanto defeitos pequenos, e arranhões finos ficam abaixo dessa
-variação. Por isso, achar quase todos os defeitos custa rejeitar a maior parte das cápsulas boas. O
-caminho mais promissor é tratar as regiões variáveis restantes (logo parcialmente visível,
-contorno, reflexos) com a mesma estratégia usada no "500": segmentar e comparar de forma específica,
-em vez de subtrair diretamente.
+**Classificar o tipo** continua parcial (0,63): os especialistas de contraste local não são
+exclusivos, e rachadura, furinho e arranhão se confundem. Os próximos passos naturais são casar o
+logo com modelos de cápsulas boas (como foi feito com o "500"), para tratar o logo cortado junto à
+borda, e descrever a região acusada por atributos de forma e textura para separar melhor esses
+três defeitos. Como os especialistas foram desenhados olhando o mesmo conjunto em que são
+avaliados, os números da cascata devem ser confirmados em cápsulas novas.
 
 ## Referências
 
@@ -340,4 +522,5 @@ em vez de subtrair diretamente.
 - Hu, M.-K. *Visual Pattern Recognition by Moment Invariants.* IRE Trans. Information Theory, 1962.
 - Cortes, C.; Vapnik, V. *Support-Vector Networks.* Machine Learning, 1995.
 - Breiman, L. *Random Forests.* Machine Learning, 2001.
-- Gonzalez, R. C.; Woods, R. E. *Processamento Digital de Imagens.* Pearson.
+- Gonzalez, R. C.; Woods, R. E. *Processamento Digital de Imagens.* Pearson. (morfologia em tons
+  de cinza: *top-hat* e *black-hat*; casamento por correlação.)

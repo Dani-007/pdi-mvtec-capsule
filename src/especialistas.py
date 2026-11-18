@@ -1,0 +1,641 @@
+"""
+Etapa 7 - Um especialista por defeito (orientação do professor).
+
+Em vez de um método único que tenta achar todos os defeitos (golden template das Etapas 1-5),
+cada defeito tem um método próprio, que procura só a marca que aquele defeito deixa na imagem,
+como foi feito na Etapa 4 com a impressão "500". Cada especialista devolve UM número (quanto
+maior, mais suspeita) e uma máscara com a região que ele acusou:
+
+    1. squeeze (amassado)       a SILHUETA muda. Compara a máscara da cápsula com a silhueta boa
+                                mais parecida (XOR) e mede a maior região que sobra.
+    2. faulty_imprint           o "500" muda. Casa cada algarismo com o de cápsulas boas
+       (impressão falha)        (correlação normalizada) e fica com o pior algarismo.
+    3. crack (rachadura)        a tampa preta lasca e deixa o laranja à mostra (ou sai pó branco).
+                                Segmenta preto x laranja pela COR (Otsu no canal a* do Lab) e
+                                compara a forma da tampa com a de cápsulas boas (fora do "500").
+    4. poke (furinho)           mancha compacta com contraste local. Top-hat e black-hat de 15 px,
+                                descontando o que as cápsulas boas também têm; maior mancha.
+    5. scratch (arranhão)       feixe de riscos finos e claros, de baixo contraste. Top-hat de
+                                9 px com limiar baixo; conta os fragmentos numa janela de 101 px.
+
+Peças comuns:
+    - Contexto: tudo o que se calcula uma vez por imagem (máscara da cápsula, tampa preta,
+      divisa preto/laranja, "500", logo e a zona válida para procurar contraste local).
+    - Referencias: o que vem das 30 cápsulas boas do conjunto 'banco' (silhuetas, tampas,
+      modelos do "500" e os envelopes).
+    - Envelope: as cápsulas boas também têm estruturas claras/escuras finas (a linha de reflexo
+      no meio, a marca do molde, linhas internas), sempre no mesmo lugar. O envelope é o MÁXIMO
+      do top-hat nas 30 boas do banco, dilatado 9 px (tolerância de posição). Só o que passa do
+      envelope conta como suspeito. O "500" e o logo mudam de lugar (a cápsula gira), então
+      ficam fora da zona válida: o "500" é do especialista 2 e o logo é variação normal.
+
+A pose da cápsula é estável na base (centro +-3 px, ângulo +-0,3 grau, tampa preta sempre à
+esquerda), então o alinhamento com as referências é só uma translação pelo centroide.
+
+Nada aqui usa rótulos. Os limiares de decisão ficam em cascata.py (definidos só no treino).
+
+Uso (passo a passo de uma imagem):
+    python src/especialistas.py --defeito crack --indice 10 --salvar saida.png
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from impressao import segmentar_impressao, segmentar_logo
+from pipeline import (
+    RAIZ, carregar_imagem, carregar_mascara_gt, caminho_teste, converter_cinza,
+    filtro_bilateral, segmentar_capsula,
+)
+
+# =============================================================================
+# PARÂMETROS
+# =============================================================================
+ESTAGIOS = ["squeeze", "faulty_imprint", "crack", "poke", "scratch"]   # ordem da cascata
+NOMES = {"squeeze": "amassado", "faulty_imprint": "impressão falha", "crack": "rachadura",
+         "poke": "furinho", "scratch": "arranhão"}
+
+# --- Zona válida (onde os especialistas 4 e 5 procuram contraste local) --------
+# Faixa de 13 px junto ao contorno: a borda da cápsula tem contraste alto e pequenas variações
+#   de forma viram risco claro/escuro no top-hat. (Com 19 ou 25 px a detecção piora: rachaduras
+#   e furinhos ficam perto da borda.)
+# "500" dilatado 13 px: a posição da impressão muda com o giro; quem cuida dela é o
+#   especialista 2. (Excluir o retângulo inteiro do "500" piora: arranhões e furinhos passam
+#   entre os algarismos.)
+# Divisa preto/laranja: faixa de +-9 px em torno da coluna da divisa (degrau forte e posição
+#   variável, porque o comprimento da cápsula varia ~30 px).
+BANDA_CONTORNO = 13
+DILATA_IMPRESSAO = 13
+MEIA_LARGURA_DIVISA = 9
+LIMIAR_PRETO = 60          # cinza < 60 = tampa preta (mesmo valor de impressao.py)
+
+# --- Logo "actavis" --------------------------------------------------------------
+# O logo aparece em ~1/3 das cápsulas, em altura variável (a tampa gira). Ele é uma CADEIA
+# horizontal comprida de componentes claros; um furinho ou uma lasca são manchas isoladas.
+# Fechamento com retângulo 45x15 junta as letras; só cadeias com >= 100 px de largura são
+# tratadas como logo (um furinho de 80 px continua visível).
+LOGO_FECHAMENTO = (45, 15)
+LOGO_LARGURA_MIN = 100
+LOGO_DILATA = 15
+
+# --- Envelope das cápsulas boas ---------------------------------------------------
+TOLERANCIA_ENVELOPE = 9    # dilatação (px) de cada mapa bom: tolera +-4 px de posição
+
+# --- 1. Squeeze --------------------------------------------------------------------
+# Abertura 7x7 no XOR das silhuetas: entre duas cápsulas boas sobra uma casca de 1-3 px ao
+#   longo do contorno; a abertura apaga a casca e mantém as regiões largas (amassados).
+SQUEEZE_ABERTURA = 7
+
+# --- 2. Impressão ------------------------------------------------------------------
+IMP_MARGEM = 8             # borda (px) em volta do "500" no modelo
+IMP_BUSCA = (40, 60)       # busca do "500" inteiro: +-40 px em x, +-60 px em y (giro)
+IMP_BUSCA_ALGARISMO = 6    # ajuste fino de cada algarismo (o giro "achata" a impressão)
+IMP_TOLERANCIA_LARGURA = 6 # modelos válidos: largura do "500" a até 6 px da mediana do banco
+IMP_LIMIAR_MASCARA = 30    # |teste - modelo| > 30 marca a região (mesmo limiar da Etapa 1)
+
+# --- 3. Rachadura ------------------------------------------------------------------
+# Abertura 9x9 no XOR das tampas: a borda da região laranja é menos nítida que a silhueta
+#   (sombra na base da cápsula), então a casca normal é mais grossa que no squeeze.
+RACHADURA_ABERTURA = 9
+
+# --- 4. Furinho --------------------------------------------------------------------
+# Elemento de 15 px: o top-hat guarda estruturas mais estreitas que 15 px (o brilho e a
+#   sombra de um furo; os furos têm 30-60 px, com detalhes internos de 5-15 px).
+# Limiar 6: o resíduo acima do envelope, nas boas de calibração, fica quase todo abaixo disso.
+FURINHO_K = 15
+FURINHO_LIMIAR = 6
+FURINHO_FECHAMENTO = 5     # junta a parte clara e a parte escura do mesmo furo
+FURINHO_ABERTURA = 3       # remove pontos isolados
+
+# --- 5. Arranhão -------------------------------------------------------------------
+# Os riscos têm 2-5 px de largura e só 3-10 níveis de cinza de contraste. Por isso: elemento
+#   pequeno (9 px), limiar baixo (3) e imagem SEM o filtro bilateral (ele apaga os riscos;
+#   aqui só um Gaussiano 5x5). Com limiar tão baixo o risco sai picotado em fragmentos; o que
+#   denuncia o arranhão é a CONCENTRAÇÃO de fragmentos, medida numa janela de 101 px.
+ARRANHAO_K = 9
+ARRANHAO_LIMIAR = 3
+ARRANHAO_AREA_MIN = 4      # fragmentos menores que 4 px são ruído
+ARRANHAO_JANELA = 101
+
+
+def _ee(k: int) -> np.ndarray:
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+
+
+def _deslocar(img: np.ndarray, dx: float, dy: float, interp: int = cv2.INTER_LINEAR) -> np.ndarray:
+    """Translação (dx, dy); o que entra pela borda é 0."""
+    h, w = img.shape[:2]
+    return cv2.warpAffine(img, np.float32([[1, 0, dx], [0, 1, dy]]), (w, h), flags=interp)
+
+
+def _centroide(mascara: np.ndarray) -> tuple[float, float]:
+    m = cv2.moments(mascara, binaryImage=True)
+    if m["m00"] == 0:
+        return mascara.shape[1] / 2, mascara.shape[0] / 2
+    return m["m10"] / m["m00"], m["m01"] / m["m00"]
+
+
+def _maior_componente(mascara: np.ndarray) -> float:
+    """Área (px) do maior componente conexo da máscara (0 se vazia)."""
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mascara, connectivity=8)
+    return float(stats[1:, cv2.CC_STAT_AREA].max()) if n > 1 else 0.0
+
+
+def _caixa(mascara: np.ndarray) -> tuple[int, int, int, int] | None:
+    ys, xs = np.where(mascara > 0)
+    if len(xs) == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+# =============================================================================
+# CONTEXTO: o que se calcula uma vez por imagem
+# =============================================================================
+@dataclass
+class Contexto:
+    bgr: np.ndarray
+    cinza: np.ndarray          # tons de cinza + bilateral (Etapa 1)
+    suave: np.ndarray          # tons de cinza + Gaussiano 5x5 (preserva riscos finos)
+    capsula: np.ndarray        # máscara da cápsula (silhueta)
+    centro: tuple[float, float]
+    preto: np.ndarray          # tampa preta: cápsula menos a região laranja
+    centro_preto: tuple[float, float]
+    x_divisa: int              # coluna da divisa preto/laranja
+    impressao: np.ndarray      # máscara do "500"
+    logo: np.ndarray           # zona do logo (vazia se ele não aparece)
+    valida: np.ndarray         # bool: onde os especialistas 4 e 5 procuram
+
+
+def segmentar_laranja(bgr: np.ndarray, capsula: np.ndarray, canal: str = "a") -> np.ndarray:
+    """Região laranja da cápsula pelo histograma de COR dentro da cápsula (Otsu).
+
+    canal 'a' (padrão): a* do Lab, que mede verde-vermelho. O laranja tem a* alto; o preto, o
+    logo cinza e o pó branco têm a* baixo, então os três caem no lado "não laranja" e o logo
+    não fura a tampa preta. canal 'cinza' é o candidato descartado: o limiar de Otsu no cinza
+    cai entre o logo e o laranja escuro da borda, e a forma da tampa passa a depender do logo.
+    """
+    if canal == "a":
+        c = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)[..., 1]
+    else:
+        c = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    c = cv2.GaussianBlur(c, (5, 5), 0)
+    dentro = capsula > 0
+    if not dentro.any():
+        return np.zeros_like(capsula)
+    t, _ = cv2.threshold(c[dentro].reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return np.where((c > t) & dentro, 255, 0).astype(np.uint8)
+
+
+def coluna_divisa(cinza: np.ndarray, capsula: np.ndarray) -> int:
+    """Primeira coluna (da esquerda para a direita) em que menos da metade da cápsula é preta.
+    Na base, a tampa preta está sempre à esquerda."""
+    dentro = capsula > 0
+    altura = dentro.sum(0)
+    frac_preta = ((cinza < LIMIAR_PRETO) & dentro).sum(0) / np.maximum(altura, 1)
+    xs = np.where(altura > 100)[0]
+    if len(xs) == 0:
+        return cinza.shape[1] // 2
+    claras = xs[frac_preta[xs] < 0.5]
+    return int(claras[0]) if len(claras) else int(xs[len(xs) // 2])
+
+
+def zona_logo(cinza: np.ndarray, capsula: np.ndarray) -> np.ndarray:
+    """Zona do logo: cadeia horizontal comprida de componentes claros na tampa preta."""
+    logo = segmentar_logo(cinza, capsula)
+    if not logo.any():
+        return logo
+    junto = cv2.morphologyEx(logo, cv2.MORPH_CLOSE,
+                             cv2.getStructuringElement(cv2.MORPH_RECT, LOGO_FECHAMENTO))
+    n, rotulos, stats, _ = cv2.connectedComponentsWithStats(junto, connectivity=8)
+    saida = np.zeros_like(logo)
+    for i in range(1, n):
+        if stats[i, cv2.CC_STAT_WIDTH] >= LOGO_LARGURA_MIN:
+            saida[rotulos == i] = 255
+    return cv2.dilate(saida, _ee(LOGO_DILATA))
+
+
+def preparar(bgr: np.ndarray) -> Contexto:
+    bruto = converter_cinza(bgr)
+    cinza = filtro_bilateral(bruto)
+    capsula, _ = segmentar_capsula(cinza, erosao=0)
+    laranja = segmentar_laranja(bgr, capsula)
+    preto = np.where((capsula > 0) & (laranja == 0), 255, 0).astype(np.uint8)
+    x_div = coluna_divisa(cinza, capsula)
+    impressao, _ = segmentar_impressao(cinza, capsula)
+    logo = zona_logo(cinza, capsula)
+
+    valida = cv2.erode(capsula, _ee(2 * BANDA_CONTORNO + 1)) > 0
+    valida &= cv2.dilate(impressao, _ee(DILATA_IMPRESSAO)) == 0
+    valida &= logo == 0
+    valida[:, max(x_div - MEIA_LARGURA_DIVISA, 0):x_div + MEIA_LARGURA_DIVISA + 1] = False
+
+    return Contexto(bgr=bgr, cinza=cinza, suave=cv2.GaussianBlur(bruto, (5, 5), 0),
+                    capsula=capsula, centro=_centroide(capsula), preto=preto,
+                    centro_preto=_centroide(preto), x_divisa=x_div, impressao=impressao,
+                    logo=logo, valida=valida)
+
+
+def realce_claro(ctx: Contexto, k: int) -> np.ndarray:
+    """Top-hat: estruturas CLARAS mais estreitas que k px."""
+    return cv2.morphologyEx(ctx.suave, cv2.MORPH_TOPHAT, _ee(k))
+
+
+def realce_escuro(ctx: Contexto, k: int) -> np.ndarray:
+    """Black-hat: estruturas ESCURAS mais estreitas que k px."""
+    return cv2.morphologyEx(ctx.suave, cv2.MORPH_BLACKHAT, _ee(k))
+
+
+# =============================================================================
+# REFERÊNCIAS: o que vem das cápsulas boas do banco
+# =============================================================================
+@dataclass
+class Referencias:
+    silhuetas: list[tuple[np.ndarray, tuple[float, float]]]
+    tampas: list[tuple[np.ndarray, tuple[float, float]]]
+    modelos_500: list[dict]
+    centro_medio: tuple[float, float]
+    envelopes: dict[tuple[str, int], np.ndarray] = field(default_factory=dict)
+    area_500: float = 1.0      # área mediana do "500" no banco (só para candidatos)
+    forma: tuple[np.ndarray, np.ndarray] | None = None   # média/desvio dos descritores globais
+
+
+def _modelos_500(ctxs: list[Contexto]) -> list[dict]:
+    """Recorte do "500" de cada cápsula boa (com margem) e os 3 trechos dos algarismos.
+
+    Em parte das boas a máscara do "500" gruda na linha de reflexo e fica larga demais;
+    essas não servem de modelo (a divisão em 3 algarismos ficaria errada)."""
+    caixas = [_caixa(c.impressao) for c in ctxs]
+    larguras = [cx[2] - cx[0] for cx in caixas if cx is not None]
+    mediana = float(np.median(larguras))
+    modelos = []
+    for c, cx in zip(ctxs, caixas):
+        if cx is None or abs((cx[2] - cx[0]) - mediana) > IMP_TOLERANCIA_LARGURA:
+            continue
+        x0, y0, x1, y1 = cx
+        m = IMP_MARGEM
+        terco = (x1 - x0) / 3
+        cortes = [(int(k * terco) + m - 4, int((k + 1) * terco) + m + 4) for k in range(3)]
+        modelos.append({"imagem": c.cinza[y0 - m:y1 + m, x0 - m:x1 + m].copy(),
+                        "x": x0 - m, "y": y0 - m, "cortes": cortes})
+    return modelos
+
+
+def construir_referencias(caminhos: list[Path], ks_claro: tuple[int, ...] = (ARRANHAO_K, FURINHO_K),
+                          ks_escuro: tuple[int, ...] = (FURINHO_K,),
+                          tolerancia: int = TOLERANCIA_ENVELOPE) -> Referencias:
+    """Monta as referências com as cápsulas boas do banco (30 imagens, ~15 s)."""
+    ctxs = [preparar(carregar_imagem(c)) for c in caminhos]
+    centro = tuple(np.mean([c.centro for c in ctxs], axis=0))
+    refs = Referencias(
+        silhuetas=[(c.capsula, c.centro) for c in ctxs],
+        tampas=[(c.preto, c.centro_preto) for c in ctxs],
+        modelos_500=_modelos_500(ctxs),
+        centro_medio=centro,
+        area_500=float(np.median([np.count_nonzero(c.impressao) for c in ctxs])),
+    )
+    descr = np.array([descritores_silhueta(c.capsula) for c in ctxs])
+    refs.forma = (descr.mean(0), descr.std(0))
+
+    def envelope(funcao, k: int) -> np.ndarray:
+        mapas = []
+        for c in ctxs:
+            m = funcao(c, k) * c.valida.astype(np.uint8)
+            m = cv2.dilate(m, _ee(tolerancia))
+            mapas.append(_deslocar(m, centro[0] - c.centro[0], centro[1] - c.centro[1]))
+        return np.max(mapas, axis=0)
+
+    for k in ks_claro:
+        refs.envelopes[("claro", k)] = envelope(realce_claro, k)
+    for k in ks_escuro:
+        refs.envelopes[("escuro", k)] = envelope(realce_escuro, k)
+    return refs
+
+
+def acima_do_envelope(ctx: Contexto, refs: Referencias, tipo: str, k: int,
+                      usar_envelope: bool = True) -> np.ndarray:
+    """Realce (top-hat ou black-hat) da imagem menos o envelope das boas, na zona válida."""
+    mapa = realce_claro(ctx, k) if tipo == "claro" else realce_escuro(ctx, k)
+    if usar_envelope:
+        env = _deslocar(refs.envelopes[(tipo, k)], ctx.centro[0] - refs.centro_medio[0],
+                        ctx.centro[1] - refs.centro_medio[1])
+        mapa = cv2.subtract(mapa, env)
+    return mapa * ctx.valida.astype(np.uint8)
+
+
+# =============================================================================
+# 1. SQUEEZE: silhueta
+# =============================================================================
+def _xor_mais_parecida(mascara: np.ndarray, centro: tuple[float, float],
+                       referencias: list[tuple[np.ndarray, tuple[float, float]]]) -> np.ndarray:
+    """XOR da máscara com a referência mais parecida (a de menor XOR), alinhada pelo centroide.
+    Usar a mais parecida, e não uma silhueta média, tolera a variação normal de comprimento."""
+    melhor, menor = None, None
+    for ref, c in referencias:
+        x = cv2.bitwise_xor(mascara, _deslocar(ref, centro[0] - c[0], centro[1] - c[1],
+                                               cv2.INTER_NEAREST))
+        n = cv2.countNonZero(x)
+        if menor is None or n < menor:
+            melhor, menor = x, n
+    return melhor
+
+
+def especialista_squeeze(ctx: Contexto, refs: Referencias,
+                         abertura: int = SQUEEZE_ABERTURA) -> tuple[float, np.ndarray]:
+    xor = _xor_mais_parecida(ctx.capsula, ctx.centro, refs.silhuetas)
+    mascara = cv2.morphologyEx(xor, cv2.MORPH_OPEN, _ee(abertura))
+    return _maior_componente(mascara), mascara
+
+
+def descritores_silhueta(capsula: np.ndarray) -> list[float]:
+    """Descritores globais da silhueta: área, solidez, altura e compacidade."""
+    contornos, _ = cv2.findContours(capsula, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contornos:
+        return [0.0, 0.0, 0.0, 0.0]
+    c = max(contornos, key=cv2.contourArea)
+    area, perim = cv2.contourArea(c), cv2.arcLength(c, True)
+    casco = cv2.contourArea(cv2.convexHull(c))
+    (_, _), (w, h), _ = cv2.minAreaRect(c)
+    return [area, area / max(casco, 1), min(w, h), perim ** 2 / (4 * np.pi * max(area, 1))]
+
+
+def candidato_squeeze_descritores(ctx: Contexto, refs: Referencias) -> float:
+    """Candidato descartado: maior z-score dos descritores globais em relação ao banco."""
+    media, desvio = refs.forma
+    z = np.abs(np.array(descritores_silhueta(ctx.capsula)) - media) / np.maximum(desvio, 1e-9)
+    return float(z.max())
+
+
+# =============================================================================
+# 2. IMPRESSÃO: casamento de cada algarismo
+# =============================================================================
+def _casar_500(ctx: Contexto, modelo: dict) -> tuple[float, float, tuple[int, int]]:
+    """Casa o "500" do modelo na imagem. Devolve (correlação do "500" inteiro, correlação do
+    pior algarismo, posição (x, y) do casamento)."""
+    img = ctx.cinza
+    t = modelo["imagem"]
+    th, tw = t.shape
+    bx, by = IMP_BUSCA
+    x0, y0 = max(modelo["x"] - bx, 0), max(modelo["y"] - by, 0)
+    janela = img[y0:modelo["y"] + th + by, x0:modelo["x"] + tw + bx]
+    if janela.shape[0] < th or janela.shape[1] < tw:
+        return -1.0, -1.0, (modelo["x"], modelo["y"])
+    _, inteiro, _, pos = cv2.minMaxLoc(cv2.matchTemplate(janela, t, cv2.TM_CCOEFF_NORMED))
+    px, py = x0 + pos[0], y0 + pos[1]
+
+    pior = 1.0
+    f = IMP_BUSCA_ALGARISMO
+    for a, b in modelo["cortes"]:
+        a, b = max(a, 0), min(b, tw)
+        alg = t[:, a:b]
+        jy, jx = max(py - f, 0), max(px + a - f, 0)
+        jan = img[jy:py + th + f, jx:px + b + f]
+        if jan.shape[0] < alg.shape[0] or jan.shape[1] < alg.shape[1]:
+            return inteiro, -1.0, (px, py)
+        pior = min(pior, cv2.minMaxLoc(cv2.matchTemplate(jan, alg, cv2.TM_CCOEFF_NORMED))[1])
+    return inteiro, pior, (px, py)
+
+
+def especialista_impressao(ctx: Contexto, refs: Referencias,
+                           por_algarismo: bool = True) -> tuple[float, np.ndarray]:
+    """1 - correlação do pior algarismo, com o modelo do banco que melhor casa.
+
+    por_algarismo=False é o candidato descartado (correlação do "500" inteiro): uma falha num
+    algarismo só muda 1/3 da área casada e a correlação cai pouco."""
+    melhor, modelo_m, pos_m = -1.0, None, (0, 0)
+    for modelo in refs.modelos_500:
+        inteiro, pior, pos = _casar_500(ctx, modelo)
+        valor = pior if por_algarismo else inteiro
+        if valor > melhor:
+            melhor, modelo_m, pos_m = valor, modelo, pos
+    mascara = np.zeros_like(ctx.cinza)
+    if modelo_m is not None:
+        t = modelo_m["imagem"]
+        px, py = pos_m
+        recorte = ctx.cinza[py:py + t.shape[0], px:px + t.shape[1]]
+        if recorte.shape == t.shape:
+            dif = np.where(cv2.absdiff(recorte, t) > IMP_LIMIAR_MASCARA, 255, 0).astype(np.uint8)
+            mascara[py:py + t.shape[0], px:px + t.shape[1]] = cv2.morphologyEx(
+                dif, cv2.MORPH_OPEN, _ee(3))
+    return 1.0 - melhor, mascara
+
+
+def candidato_impressao_area(ctx: Contexto, refs: Referencias) -> float:
+    """Candidato descartado (atributo da Etapa 4): desvio da área do "500" em relação à área
+    típica do banco."""
+    return abs(np.count_nonzero(ctx.impressao) / refs.area_500 - 1.0)
+
+
+# =============================================================================
+# 3. RACHADURA: forma da tampa preta (segmentação por cor)
+# =============================================================================
+def especialista_rachadura(ctx: Contexto, refs: Referencias, abertura: int = RACHADURA_ABERTURA,
+                           tampa: np.ndarray | None = None,
+                           tampas_ref: list | None = None) -> tuple[float, np.ndarray]:
+    """XOR da tampa preta com a tampa boa mais parecida, fora do "500", + abertura.
+
+    O "500" é excluído porque, quando a tinta sai mais clara que o normal, ela cai no lado
+    "não laranja" do Otsu e fura a região laranja; a impressão é assunto do especialista 2.
+    `tampa`/`tampas_ref` permitem testar outra segmentação (candidato com Otsu no cinza)."""
+    if tampa is None:
+        tampa, centro = ctx.preto, ctx.centro_preto
+    else:
+        centro = _centroide(tampa)
+    xor = _xor_mais_parecida(tampa, centro, refs.tampas if tampas_ref is None else tampas_ref)
+    xor[cv2.dilate(ctx.impressao, _ee(DILATA_IMPRESSAO)) > 0] = 0
+    mascara = cv2.morphologyEx(xor, cv2.MORPH_OPEN, _ee(abertura))
+    return _maior_componente(mascara), mascara
+
+
+# =============================================================================
+# 4. FURINHO: manchas de contraste local
+# =============================================================================
+def especialista_furinho(ctx: Contexto, refs: Referencias, k: int = FURINHO_K,
+                         limiar: int = FURINHO_LIMIAR,
+                         usar_envelope: bool = True) -> tuple[float, np.ndarray]:
+    claro = acima_do_envelope(ctx, refs, "claro", k, usar_envelope)
+    escuro = acima_do_envelope(ctx, refs, "escuro", k, usar_envelope)
+    mascara = np.where((claro > limiar) | (escuro > limiar), 255, 0).astype(np.uint8)
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, _ee(FURINHO_FECHAMENTO))
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, _ee(FURINHO_ABERTURA))
+    return _maior_componente(mascara), mascara
+
+
+# =============================================================================
+# 5. ARRANHÃO: concentração de fragmentos finos e claros
+# =============================================================================
+def _fragmentos(ctx: Contexto, refs: Referencias, k: int, limiar: int,
+                usar_envelope: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    claro = acima_do_envelope(ctx, refs, "claro", k, usar_envelope)
+    binaria = np.where(claro > limiar, 255, 0).astype(np.uint8)
+    n, rotulos, stats, _ = cv2.connectedComponentsWithStats(binaria, connectivity=8)
+    return binaria, rotulos, stats
+
+
+def especialista_arranhao(ctx: Contexto, refs: Referencias, k: int = ARRANHAO_K,
+                          limiar: int = ARRANHAO_LIMIAR,
+                          usar_envelope: bool = True) -> tuple[float, np.ndarray]:
+    """Maior nº de pixels de fragmentos finos dentro de uma janela de 101x101 px."""
+    _, rotulos, stats = _fragmentos(ctx, refs, k, limiar, usar_envelope)
+    manter = stats[:, cv2.CC_STAT_AREA] >= ARRANHAO_AREA_MIN
+    manter[0] = False
+    frag = manter[rotulos]
+    densidade = cv2.boxFilter(frag.astype(np.float32), -1, (ARRANHAO_JANELA, ARRANHAO_JANELA),
+                              normalize=False)
+    # máscara: os fragmentos, unidos por um fechamento (o feixe de riscos vira uma região)
+    mascara = cv2.morphologyEx(np.where(frag, 255, 0).astype(np.uint8), cv2.MORPH_CLOSE, _ee(15))
+    return float(densidade.max()), mascara
+
+
+def candidato_arranhao_maior_risco(ctx: Contexto, refs: Referencias,
+                                   usar_envelope: bool = True) -> float:
+    """Candidato descartado: comprimento (px) do maior fragmento. O risco sai picotado, então
+    o maior pedaço diz menos que a concentração de pedaços."""
+    _, _, stats = _fragmentos(ctx, refs, ARRANHAO_K, ARRANHAO_LIMIAR, usar_envelope)
+    if len(stats) <= 1:
+        return 0.0
+    return float(np.maximum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]).max())
+
+
+def candidato_arranhao_canny(ctx: Contexto) -> float:
+    """Candidato descartado (bordas da Etapa 1): nº de pixels de borda do Canny na zona válida."""
+    from pipeline import detectar_bordas_canny
+    return float(np.count_nonzero(detectar_bordas_canny(ctx.cinza)[ctx.valida]))
+
+
+# =============================================================================
+# CASCATA: os 5 especialistas em sequência
+# =============================================================================
+ESPECIALISTAS = {
+    "squeeze": especialista_squeeze,
+    "faulty_imprint": especialista_impressao,
+    "crack": especialista_rachadura,
+    "poke": especialista_furinho,
+    "scratch": especialista_arranhao,
+}
+
+
+def examinar(bgr: np.ndarray, refs: Referencias) -> tuple[dict[str, float], dict[str, np.ndarray]]:
+    """Passa a imagem pelos 5 especialistas. Devolve {estágio: valor} e {estágio: máscara}."""
+    ctx = preparar(bgr)
+    valores, mascaras = {}, {}
+    for nome in ESTAGIOS:
+        valores[nome], mascaras[nome] = ESPECIALISTAS[nome](ctx, refs)
+    return valores, mascaras
+
+
+def referencias_do_banco() -> Referencias:
+    from particao import carregar_particao
+    return construir_referencias([l["caminho"] for l in carregar_particao("banco")])
+
+
+# =============================================================================
+# Passo a passo de uma imagem (figura)
+# =============================================================================
+def figura_passo_a_passo(bgr: np.ndarray, gt: np.ndarray, refs: Referencias, titulo: str,
+                         limiares: dict[str, float] | None = None,
+                         salvar: str | Path | None = None, mostrar: bool = True) -> None:
+    """Linha de cima: o que cada especialista olha. Linha de baixo: o que ele acusa."""
+    import matplotlib.pyplot as plt
+
+    ctx = preparar(bgr)
+    ys, xs = np.where(ctx.capsula > 0)
+    y0, y1 = max(ys.min() - 40, 0), min(ys.max() + 40, bgr.shape[0])
+    x0, x1 = max(xs.min() - 40, 0), min(xs.max() + 40, bgr.shape[1])
+    rec = lambda im: im[y0:y1, x0:x1]
+
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    k = FURINHO_K
+    realce = np.zeros((*ctx.cinza.shape, 3), np.uint8)
+    realce[..., 1] = np.clip(acima_do_envelope(ctx, refs, "claro", k).astype(int) * 12, 0, 255)
+    realce[..., 0] = np.clip(acima_do_envelope(ctx, refs, "escuro", k).astype(int) * 12, 0, 255)
+    fino = np.clip(acima_do_envelope(ctx, refs, "claro", ARRANHAO_K).astype(int) * 25, 0, 255)
+    zonas = (rgb * 0.45).astype(np.uint8)
+    zonas[ctx.valida] = rgb[ctx.valida]
+    entradas = {
+        "squeeze": (ctx.capsula, "silhueta (Otsu)", "gray"),
+        "faulty_imprint": (ctx.impressao, '"500" (histograma do realce)', "gray"),
+        "crack": (ctx.preto, "tampa preta (Otsu no a*)", "gray"),
+        "poke": (realce, f"top-hat/black-hat {k} px acima do envelope", None),
+        "scratch": (fino, f"top-hat {ARRANHAO_K} px acima do envelope", "gray"),
+    }
+
+    fig, eixos = plt.subplots(2, 6, figsize=(24, 6.2))
+    for ax in eixos.ravel():
+        ax.axis("off")
+    eixos[0, 0].imshow(rec(rgb))
+    eixos[0, 0].set_title("imagem (verde = defeito real)", fontsize=10)
+    if gt.any():
+        eixos[0, 0].contour(rec(gt) > 0, levels=[0.5], colors="lime", linewidths=1)
+    eixos[1, 0].imshow(rec(zonas))
+    eixos[1, 0].set_title('zona válida dos especialistas 4 e 5\n(sem contorno, "500", logo e divisa)',
+                          fontsize=10)
+
+    acusou = []
+    for col, nome in enumerate(ESTAGIOS, start=1):
+        valor, mascara = ESPECIALISTAS[nome](ctx, refs)
+        img, legenda, cmap = entradas[nome]
+        eixos[0, col].imshow(rec(img), cmap=cmap)
+        eixos[0, col].set_title(f"{col}. {NOMES[nome]}\n{legenda}", fontsize=10)
+        sobre = (rgb * 0.55).astype(np.uint8)
+        sobre[mascara > 0] = (255, 60, 60)
+        eixos[1, col].imshow(rec(sobre))
+        texto = f"valor = {valor:.3f}" if valor < 1 else f"valor = {valor:.0f}"
+        if limiares is not None:
+            disparou = valor > limiares[nome]
+            texto += f"  (limiar {limiares[nome]:.3g})\n" + ("DEFEITO" if disparou else "passou")
+            if disparou:
+                acusou.append(NOMES[nome])
+        eixos[1, col].set_title(texto, fontsize=10,
+                                color="crimson" if "DEFEITO" in texto else "black")
+        if gt.any():
+            eixos[1, col].contour(rec(gt) > 0, levels=[0.5], colors="lime", linewidths=1)
+    if limiares is not None:
+        titulo += "   ->   " + ("DEFEITUOSA (" + ", ".join(acusou) + ")" if acusou else "BOA")
+    fig.suptitle(titulo, fontsize=13)
+    fig.tight_layout()
+    if salvar:
+        fig.savefig(salvar, dpi=80)
+    if mostrar:
+        plt.show()
+    plt.close(fig)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Especialistas por defeito: passo a passo")
+    parser.add_argument("--defeito", default="crack",
+                        choices=["good", "crack", "faulty_imprint", "poke", "scratch", "squeeze"])
+    parser.add_argument("--indice", type=int, default=0)
+    parser.add_argument("--salvar", default=None, help="arquivo .png de saída")
+    args = parser.parse_args()
+
+    if args.salvar:
+        import matplotlib
+        matplotlib.use("Agg")
+    print("Montando as referências com as 30 boas do banco...")
+    refs = referencias_do_banco()
+    bgr = carregar_imagem(caminho_teste(args.defeito, args.indice))
+    gt = carregar_mascara_gt(args.defeito, args.indice, bgr.shape[:2])
+    # Limiares finais gravados por cascata.py (se já foi rodado)
+    limiares = None
+    arq_limiares = RAIZ / "dados" / "limiares_cascata.json"
+    if arq_limiares.exists():
+        import json
+        limiares = next(iter(json.loads(arq_limiares.read_text(encoding="utf-8")).values()))
+    valores, _ = examinar(bgr, refs)
+    for nome in ESTAGIOS:
+        situacao = ""
+        if limiares:
+            situacao = "  ACUSOU" if valores[nome] > limiares[nome] else "  passou"
+            situacao = f"  (limiar {limiares[nome]:.3g}){situacao}"
+        print(f"  {NOMES[nome]:<16} {valores[nome]:10.3f}{situacao}")
+    figura_passo_a_passo(bgr, gt, refs, f"capsule / {args.defeito} / {args.indice:03d}",
+                         limiares=limiares, salvar=args.salvar, mostrar=not args.salvar)
+
+
+if __name__ == "__main__":
+    main()

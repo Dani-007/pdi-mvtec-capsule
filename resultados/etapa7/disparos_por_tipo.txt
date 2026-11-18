@@ -1,0 +1,22 @@
+Quantas cápsulas de cada tipo (coluna) cada etapa (linha) acusa, ALFA = 0.02
+
+etapa                       good (192)          crack (23) faulty_imprint (22)           poke (21)        scratch (23)        squeeze (20)
+amassado                             0                   3                   0                   0                   0                  20
+impressão falha                      1                   1                  21                   9                   2                   7
+rachadura                            0                  12                   0                   4                   0                  18
+furinho                              3                  12                   9                  12                   8                   4
+arranhão                             5                  12                  15                  12                  19                   7
+alguma etapa                         7                  19                  22                  18                  19                  20
+
+Tipo apontado (primeira etapa da cascata que acusa) x tipo verdadeiro:
+
+verdadeiro                    good           crack  faulty_imprint            poke         scratch         squeeze   acerto
+good                           185               0               1               3               3               0     0.96
+crack                            4              10               1               5               0               3     0.43
+faulty_imprint                   0               0              21               0               1               0     0.95
+poke                             3               2               9               7               0               0     0.33
+scratch                          4               0               2               7              10               0     0.43
+squeeze                          0               0               0               0               0              20     1.00
+
+Acurácia balanceada do tipo nas 5 classes de defeito (não achada conta como erro): 0.63
+Entre as defeituosas achadas, tipo certo em 69%

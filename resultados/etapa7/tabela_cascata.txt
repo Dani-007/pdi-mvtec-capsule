@@ -1,0 +1,11 @@
+Cascata dos 5 especialistas, validação cruzada de 5 folds (301 imagens)
+ALFA = alarme falso aceito por etapa nas boas de treino
+
+ ALFA  espec.  recall  ac.bal.  precisão    F1    AUC      crack  faulty_     poke  scratch  squeeze
+ 0.01   0.979   0.881    0.930     0.960  0.92  0.971       0.83     0.95     0.86     0.78     1.00
+ 0.02   0.964   0.899    0.931     0.933  0.92  0.979       0.83     1.00     0.86     0.83     1.00
+ 0.03   0.938   0.927    0.932     0.894  0.91  0.979       0.87     1.00     0.90     0.87     1.00
+ 0.05   0.901   0.945    0.923     0.844  0.89  0.980       0.96     1.00     0.90     0.87     1.00
+ 0.08   0.859   0.982    0.921     0.799  0.88  0.980       1.00     1.00     0.95     0.96     1.00
+
+Regra do limiar em ALFA = 0.02: só o percentil das boas (sem levar ao meio da folga) -> especificidade 0.917, recall 0.945, acurácia balanceada 0.931

@@ -1,0 +1,9 @@
+AUC de cada especialista (linha) para separar cada tipo de defeito (coluna) das boas
+(192 boas e 109 defeituosas de 'classificacao'; 0,50 = acaso; * = defeito-alvo)
+
+especialista                 crack  faulty_imprint            poke         scratch         squeeze    todos
+amassado                    0.645           0.475           0.474           0.533           1.000*    0.619
+impressão falha             0.534           1.000*          0.734           0.645           0.804     0.740
+rachadura                   0.773*          0.482           0.605           0.504           0.974     0.662
+furinho                     0.935           0.939           0.967*          0.916           0.874     0.927
+arranhão                    0.899           0.954           0.951           0.983*          0.794     0.918

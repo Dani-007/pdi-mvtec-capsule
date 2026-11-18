@@ -10,7 +10,7 @@ Disciplina de Processamento Digital de Imagens — UFSCar · Prof. Dr. Ricardo J
 1. [Contexto e objetivo](#1-contexto-e-objetivo)
 2. [Dados e escopo](#2-dados-e-escopo)
 3. [Andamento](#3-andamento)
-4. [Pipeline (Etapas 1–5)](#4-pipeline-etapas-15)
+4. [Pipeline (Etapas 1–5 e 7)](#4-pipeline-etapas-15-e-7)
 5. [Avaliação](#5-avaliação)
 6. [Resultados](#6-resultados)
 7. [Discussão e limitações](#7-discussão-e-limitações)
@@ -37,6 +37,11 @@ etapas mais limitam o desempenho.
 Denoising → Bordas → Morfologia → Segmentação → Atributos → Classificação
 └──────────── Etapa 1: localização ────────────┘ └────── decisão ──────────┘
 ```
+
+O projeto tem duas abordagens. As Etapas 1–5 usam um **método único** para todos os defeitos
+(golden template + ficha de atributos + classificador). A **Etapa 7**, por orientação do professor,
+troca isso por **um método especialista para cada defeito**, em cascata: a cápsula passa por 5
+etapas e só é aprovada se nenhuma acusar. É a abordagem com melhor resultado (seção 6).
 
 ## 2. Dados e escopo
 
@@ -71,9 +76,10 @@ Denoising → Bordas → Morfologia → Segmentação → Atributos → Classifi
 | **3** | Máscara final: golden template com "500" e logo realinhados + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
 | **4** | Atributos: ficha da mancha mais suspeita, com "500" e logo segmentados pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
 | **5** | Classificação: SVM × Random Forest, por grupo de atributos (`src/classificacao.py`) | ✅ concluída |
-| **6** | Relatório final (`docs/relatorio.md`) | ✅ versão inicial |
+| **6** | Relatório final (`docs/relatorio.md`) | ✅ atualizado com a Etapa 7 |
+| **7** | Cascata de especialistas, um método por defeito (`src/especialistas.py`, `src/cascata.py`, `src/comparar_candidatos.py`) | ✅ concluída |
 
-## 4. Pipeline (Etapas 1–5)
+## 4. Pipeline (Etapas 1–5 e 7)
 
 ### 4.1 Pré-processamento
 | Passo | Técnica | Justificativa |
@@ -201,6 +207,58 @@ avaliada com um limiar sobre a pontuação "defeituosa" escolhido em cada rodada
 (previsões fora da amostra da validação interna): o maior limiar que ainda encontra ≥ 90% das
 defeituosas do treino.
 
+### 4.9 Etapa 7 — um especialista por defeito, em cascata (`src/especialistas.py`, `src/cascata.py`)
+
+**Orientação do professor:** em vez de procurar um método que ache todos os defeitos, usar um
+método para cada defeito, como foi feito na Etapa 4 com a impressão "500". Cada imagem passa por
+5 etapas; se nenhuma acusar, a cápsula é boa.
+
+```
+imagem → 1. amassado → 2. impressão falha → 3. rachadura → 4. furinho → 5. arranhão → BOA
+              │                │                  │              │             │
+              └────────────────┴──── acusou: DEFEITUOSA ─────────┴─────────────┘
+```
+
+Cada especialista procura só a marca que o seu defeito deixa na imagem e devolve **um número**
+(quanto maior, mais suspeita) e a máscara da região acusada:
+
+| # | Defeito | Marca na imagem | Método | Valor |
+|---|---|---|---|---|
+| 1 | *squeeze* (amassado) | a **silhueta** muda | máscara da cápsula (Otsu) × silhueta boa mais parecida do banco: XOR + abertura 7×7 | área da maior região que sobra |
+| 2 | *faulty_imprint* | o **"500"** muda | cada algarismo é casado com o de cápsulas boas por correlação normalizada (*template matching*, busca de ±40/±60 px) | 1 − correlação do pior algarismo |
+| 3 | *crack* (rachadura) | a tampa preta lasca e mostra o laranja, ou sai pó branco | segmentação preto × laranja pela **cor** (Otsu no canal a\* do Lab, dentro da cápsula); forma da tampa × tampa boa mais parecida, fora do "500": XOR + abertura 9×9 | área da maior região que sobra |
+| 4 | *poke* (furinho) | mancha compacta com **contraste local** | *top-hat* e *black-hat* de 15 px, acima do envelope das boas, limiar 6, fechamento 5 + abertura 3 | área da maior mancha |
+| 5 | *scratch* (arranhão) | feixe de **riscos finos** e claros, 3–10 níveis de contraste | *top-hat* de 9 px (sem o bilateral, que apaga os riscos), acima do envelope, limiar 3 | nº de pixels de fragmentos na janela 101×101 mais cheia |
+
+**Envelope das cápsulas boas** (especialistas 4 e 5). A cápsula boa também tem estruturas finas
+claras e escuras (linha de reflexo no meio, marca do molde, linhas internas), sempre no mesmo
+lugar. O envelope é o **máximo** do *top-hat* nas 30 boas do banco, dilatado 9 px; só o que passa
+dele conta. O que muda de lugar fica fora da **zona válida**: faixa de 13 px do contorno, o "500"
+dilatado (é do especialista 2), a divisa preto/laranja e o **logo**, segmentado como uma cadeia
+horizontal comprida de componentes claros (fechamento 45×15, largura ≥ 100 px), o que não apaga
+um furinho isolado.
+
+A pose da cápsula é estável na base (centro ±3 px, ângulo ±0,3°, tampa preta sempre à esquerda),
+então o alinhamento com as referências é só uma translação pelo centroide; o ECC não é mais usado.
+
+**Como cada método foi escolhido** (`src/comparar_candidatos.py`): para cada defeito, 3 a 5
+candidatos foram comparados pelo AUC do defeito-alvo contra as boas e pela fração achada com ~2%
+de alarme falso (tabela na seção 6).
+
+**Limiar de cada etapa** (`src/cascata.py`), definido só com imagens de treino:
+1. `a` = percentil (1 − ALFA) do valor nas boas de treino: a etapa aceita alarme falso em no
+   máximo ALFA das boas;
+2. limiar = ponto médio entre `a` e o menor valor, acima de `a`, entre os defeitos-alvo de treino.
+   Onde há folga entre boas e defeitos (amassado, impressão), o limiar vai para o meio da folga.
+
+**Protocolo:** referências = 30 boas do `banco`; limiares em validação cruzada com os 5 folds da
+partição (treino = 20 boas de `calibracao` + 4 folds; decisão no 5º). ALFA é o ponto de operação:
+2% (padrão) ou 5% (prioriza defeitos).
+
+**Tipo apontado:** a primeira etapa que acusa. A ordem vai do especialista mais específico
+(amassado, impressão) para os mais gerais (furinho, arranhão), que medem contraste local e também
+reagem aos outros defeitos.
+
 ## 5. Avaliação
 
 Pixel a pixel contra o ground truth. Etapa 1: as 132 imagens de `test/` (109 defeituosas + 23
@@ -327,7 +385,92 @@ Evolução da classificação com as mudanças de localização e de ficha (melh
 | + realinhamento do "500"/logo | 0,71 | 0,93 / 0,23 | 0,48 |
 | **+ mancha principal fora do "500"/logo (final)** | **0,70** | **0,94 / 0,19** | **0,58** |
 
+**Etapa 7 — cascata de especialistas** (`resultados/etapa7/`)
+
+*Qual método para cada defeito* (`tabela_candidatos.txt`; AUC do defeito-alvo × boas; "achadas" =
+fração do defeito-alvo acima do percentil 98 das boas de treino, em 5 folds):
+
+| Defeito | Método | AUC | Achadas |
+|---|---|---:|---:|
+| *squeeze* | método único (maior mancha do golden template, Etapas 3–4) | 0,992 | 0,95 |
+| | descritores globais da silhueta | 0,993 | 0,95 |
+| | **XOR com a silhueta boa mais parecida + abertura 7** | **1,000** | **1,00** |
+| *faulty_imprint* | método único | 0,666 | 0,05 |
+| | desvio da área do "500" (atributo da Etapa 4) | 0,817 | 0,36 |
+| | correlação do "500" inteiro | 0,999 | 0,95 |
+| | **correlação do pior algarismo** | **1,000** | **1,00** |
+| *crack* | método único | 0,726 | 0,26 |
+| | forma da tampa preta, Otsu no cinza | 0,636 | 0,13 |
+| | **forma da tampa preta, Otsu no a\*** | **0,773** | **0,52** |
+| | contraste local 15 px (especialista do furinho) | 0,935 | 0,57 |
+| *poke* | método único | 0,562 | 0,05 |
+| | top-hat/black-hat 15 px, sem envelope | 0,751 | 0,00 |
+| | top-hat/black-hat 25 px, acima do envelope | 0,906 | 0,57 |
+| | **top-hat/black-hat 15 px, acima do envelope** | **0,967** | **0,62** |
+| *scratch* | método único | 0,492 | 0,00 |
+| | pixels de borda do Canny (Etapa 1) | 0,526 | 0,04 |
+| | maior risco (top-hat 9 px), acima do envelope | 0,961 | 0,61 |
+| | concentração de fragmentos, sem envelope | 0,934 | 0,30 |
+| | **concentração de fragmentos, acima do envelope** | **0,983** | **0,87** |
+
+Na rachadura, o contraste local tem AUC maior, mas ele já é a etapa 4; a forma da tampa foi
+escolhida porque acha as lascas, que quase não têm contraste local (sem a etapa 3, a cascata cai
+de 19 para 14 rachaduras achadas).
+
+*Normal × defeituosa* (`tabela_cascata.txt`; 301 imagens, 5 folds):
+
+| ALFA | Boas aprovadas | Defeituosas encontradas | Acur. bal. | Precisão | crack / imprint / poke / scratch / squeeze |
+|---|---:|---:|---:|---:|---|
+| 1% | 0,98 | 0,88 | 0,93 | 0,96 | 0,83 / 0,95 / 0,86 / 0,78 / 1,00 |
+| **2% (padrão)** | **0,96** (185/192) | **0,90** (98/109) | **0,93** | **0,93** | 0,83 / 1,00 / 0,86 / 0,83 / 1,00 |
+| 3% | 0,94 | 0,93 | 0,93 | 0,89 | 0,87 / 1,00 / 0,90 / 0,87 / 1,00 |
+| **5% (prioriza defeitos)** | **0,90** | **0,94** (103/109) | **0,92** | 0,84 | 0,96 / 1,00 / 0,90 / 0,87 / 1,00 |
+| 8% | 0,86 | 0,98 | 0,92 | 0,80 | 1,00 / 1,00 / 0,95 / 0,96 / 1,00 |
+
+ROC-AUC da cascata (maior valor/limiar entre as etapas): 0,98 (Etapa 5: 0,75).
+
+Comparação com o método único (Etapa 5): acurácia balanceada **0,70 → 0,93**; encontrando 94% das
+defeituosas, as boas aprovadas passam de **19% para 90%** (`ponto_de_operacao.png`).
+
+*Que etapa acusa cada tipo* (ALFA = 2%; `disparos_por_tipo.png`):
+
+| Etapa | boa (192) | crack (23) | imprint (22) | poke (21) | scratch (23) | squeeze (20) |
+|---|---:|---:|---:|---:|---:|---:|
+| 1. amassado | 0 | 3 | 0 | 0 | 0 | **20** |
+| 2. impressão falha | 1 | 1 | **21** | 9 | 2 | 7 |
+| 3. rachadura | 0 | **12** | 0 | 4 | 0 | 18 |
+| 4. furinho | 3 | 12 | 9 | **12** | 8 | 4 |
+| 5. arranhão | 5 | 12 | 15 | 12 | **19** | 7 |
+| alguma etapa | 7 | 19 | 22 | 18 | 19 | 20 |
+
+- *Tipo apontado* (primeira etapa que acusa): acurácia balanceada **0,63** nas 5 classes, contando
+  defeituosa não achada como erro (Etapa 5: 0,58, só entre defeituosas). Por tipo: *squeeze* 1,00,
+  *faulty_imprint* 0,95, *crack* 0,43, *scratch* 0,43, *poke* 0,33.
+- *Ablação* (`ablacao.txt`): tirar o especialista da impressão derruba a impressão falha de 22
+  para 15 achadas (e os furinhos de 18 para 14); o do arranhão, de 19 para 9; o da rachadura, de
+  19 para 14; o do amassado, de 20 para 18. Tirar o do furinho **não perde nenhuma cápsula** neste
+  ponto de operação: os furinhos que ele acha também são achados pelos especialistas do arranhão
+  e da impressão.
+- *Localização* (`localizacao.txt`; união das máscaras das etapas que acusaram × ground truth):
+  hit **0,86** e Dice **0,30** (Etapa 3: 0,64 e 0,155); nas boas, 20 px falsos por imagem e 4% com
+  algum pixel marcado (Etapa 3: 1.913 px e 86%).
+- *Erros* (`erros.csv`, `erro_*.png`): 7 boas rejeitadas (nas conferidas, o logo cortado junto à
+  borda) e 11 defeituosas aprovadas (4 rachaduras, 4 arranhões e 3 furinhos, de baixo contraste
+  ou junto à divisa/contorno).
+
 ## 7. Discussão e limitações
+
+- **Um método por defeito funciona muito melhor que um método único (Etapa 7).** Cada defeito
+  deixa uma marca diferente: silhueta (amassado), impressão, cor da tampa (rachadura), contraste
+  local (furinho) e riscos finos (arranhão). Procurar cada marca com o método certo levou a
+  decisão normal × defeituosa de 0,70 para 0,93 de acurácia balanceada. O arranhão, invisível para
+  o golden template (AUC 0,49), passa a ser separado das boas com AUC 0,98.
+- **O envelope das boas é o que viabiliza o contraste local.** Sem descontar as estruturas normais,
+  o mesmo top-hat acha 0% dos furinhos com 2% de alarme falso; com o envelope, 62%.
+- **Os especialistas não são exclusivos.** Furinho e arranhão medem contraste local e reagem a
+  quase todos os defeitos; por isso a cascata acha bem **se há** defeito, mas aponta **qual** com
+  acerto limitado (0,63). Rachadura, furinho e arranhão se confundem entre si, e o especialista
+  do furinho acaba redundante na cascata (ablação).
 
 - **Bordas não separam defeito de estrutura normal.** A cápsula sem defeito já tem muitas bordas
   (impressão, logo, divisão das metades, contorno). A abertura que remove essas bordas remove os
@@ -366,6 +509,13 @@ Evolução da classificação com as mudanças de localização e de ficha (melh
    otimistas.
 3. Uma única referência por imagem não tolera toda a variação normal entre cápsulas boas (logo
    parcialmente visível, reflexos, contorno).
+4. **Etapa 7: os especialistas foram desenhados olhando as imagens de `classificacao`** (todas as
+   defeituosas estão nesse conjunto): a marca procurada em cada defeito, as zonas excluídas, os
+   tamanhos dos elementos estruturantes e os limiares internos (6 e 3 níveis, janela de 101 px).
+   Só os limiares de decisão das etapas são definidos em validação cruzada. Os números da Etapa 7
+   são, portanto, otimistas; uma estimativa isenta exigiria cápsulas novas.
+5. A Etapa 7 supõe a pose da base (tampa preta à esquerda, cápsula horizontal e centrada) e não
+   resolve o logo cortado junto à borda, principal causa de alarme falso que restou.
 
 ## 8. Próximos passos
 
@@ -377,8 +527,11 @@ Evolução da classificação com as mudanças de localização e de ficha (melh
    LBP, sem GLCM, que não foi vista em aula).
 5. ~~Classificação com SVM e Random Forest, por grupo de atributos~~ (Etapa 5, feita).
 6. ~~Relatório final~~ (`docs/relatorio.md`, versão inicial).
-7. **Possível continuação:** tratar as regiões variáveis restantes (logo parcialmente visível,
-   contorno, reflexos) com segmentação e comparação específicas, como foi feito com o "500".
+7. ~~Tratar cada defeito com um método específico, como foi feito com o "500"~~ (Etapa 7, feita:
+   cascata de 5 especialistas).
+8. **Possível continuação:** casar o logo com modelos de cápsulas boas (como o "500") para tratar
+   o logo cortado junto à borda; separar melhor rachadura, furinho e arranhão com atributos da
+   região acusada (forma e textura) e um classificador só para o tipo.
 
 ## 9. Como executar
 
@@ -386,6 +539,7 @@ Evolução da classificação com as mudanças de localização e de ficha (melh
 2. Instale as dependências:
    ```
    pip install -r requirements.txt     # opencv-python, numpy, matplotlib, scikit-learn
+                                       # (scikit-learn só é usado na Etapa 5)
    ```
 3. Rode os scripts **a partir da raiz do repositório**:
    ```
@@ -406,6 +560,11 @@ Evolução da classificação com as mudanças de localização e de ficha (melh
 
    # Etapa 5
    python src/classificacao.py                           # ~6 min -> resultados/etapa5/
+
+   # Etapa 7 (independente das Etapas 3-5; só precisa de dados/particao.csv)
+   python src/cascata.py                                 # ~1 min -> resultados/etapa7/
+   python src/comparar_candidatos.py                     # ~1 min -> tabela_candidatos.txt
+   python src/especialistas.py --defeito crack --indice 10   # passo a passo de uma imagem
    ```
 
 ## 10. Estrutura do repositório
@@ -424,15 +583,21 @@ pdi-mvtec-capsule/
 │   ├── segmentacao.py      Etapa 3: máscara final (golden template + morfologia)
 │   ├── impressao.py        "500" e logo pelo histograma + realinhamento local (Etapas 3–4)
 │   ├── atributos.py        Etapa 4: ficha de atributos de cada cápsula
-│   └── classificacao.py    Etapa 5: SVM e Random Forest com validação cruzada
+│   ├── classificacao.py    Etapa 5: SVM e Random Forest com validação cruzada
+│   ├── especialistas.py    Etapa 7: os 5 especialistas (um método por defeito)
+│   ├── cascata.py          Etapa 7: limiares, decisão em cascata e avaliação
+│   └── comparar_candidatos.py   Etapa 7: comparação dos métodos candidatos por defeito
 ├── dados/
 │   ├── particao.csv        partição gerada (semente fixa)
 │   ├── atributos.csv       fichas de atributos (Etapa 4)
+│   ├── especialistas.csv   valor de cada especialista por imagem (Etapa 7)
+│   ├── limiares_cascata.json   limiares finais da cascata (Etapa 7)
 │   └── gerado/             cache e máscaras da Etapa 3 (não versionado)
 ├── resultados/
 │   ├── etapa1/             tabelas (avaliacao.txt) e exemplos de bordas e golden template
 │   ├── etapa3/             tabelas da morfologia e por tipo de defeito, exemplos passo a passo
 │   ├── etapa4/             impressão "500" e distribuição dos atributos por tipo
-│   └── etapa5/             tabelas, matrizes de confusão, importância dos atributos e erros
+│   ├── etapa5/             tabelas, matrizes de confusão, importância dos atributos e erros
+│   └── etapa7/             candidatos, cascata, ablação, localização, exemplos e erros
 └── capsule/                dataset MVTec AD (não versionado)
 ```
