@@ -4,19 +4,35 @@ etapa                       good (192)          crack (23) faulty_imprint (22)  
 amassado                             0                   3                   0                   0                   0                  20
 impressão falha                      1                   1                  21                   9                   2                   7
 rachadura                            0                  12                   0                   4                   0                  18
-furinho                              3                  12                   9                  12                   8                   4
+furinho                              3                  15                   1                  11                   1                   7
 arranhão                             5                  12                  15                  12                  19                   7
-alguma etapa                         7                  19                  22                  18                  19                  20
+alguma etapa                         9                  20                  22                  18                  19                  20
 
-Tipo apontado (primeira etapa da cascata que acusa) x tipo verdadeiro:
+Tipo apontado x tipo verdadeiro. Regra: primeira etapa que acusa; se for a da impressão e a
+diferença do "500" para o modelo for clara, o tipo é furinho (corte aprendido no treino):
 
 verdadeiro                    good           crack  faulty_imprint            poke         scratch         squeeze   acerto
-good                           185               0               1               3               3               0     0.96
-crack                            4              10               1               5               0               3     0.43
-faulty_imprint                   0               0              21               0               1               0     0.95
-poke                             3               2               9               7               0               0     0.33
-scratch                          4               0               2               7              10               0     0.43
+good                           183               0               1               3               5               0     0.95
+crack                            3              10               0               6               1               3     0.43
+faulty_imprint                   0               0              20               1               1               0     0.91
+poke                             3               2               4              11               1               0     0.52
+scratch                          4               0               2               1              16               0     0.70
 squeeze                          0               0               0               0               0              20     1.00
 
-Acurácia balanceada do tipo nas 5 classes de defeito (não achada conta como erro): 0.63
-Entre as defeituosas achadas, tipo certo em 69%
+Acurácia balanceada do tipo nas 5 classes de defeito (não achada conta como erro): 0.71
+F1 macro dos 5 tipos: 0.70
+Entre as defeituosas achadas, tipo certo em 78%
+
+Regra simples, sem olhar a diferença do "500" (só a primeira etapa que acusa):
+
+verdadeiro                    good           crack  faulty_imprint            poke         scratch         squeeze   acerto
+good                           183               0               1               3               5               0     0.95
+crack                            3              10               1               5               1               3     0.43
+faulty_imprint                   0               0              21               0               1               0     0.95
+poke                             3               2               9               6               1               0     0.29
+scratch                          4               0               2               1              16               0     0.70
+squeeze                          0               0               0               0               0              20     1.00
+
+Acurácia balanceada do tipo nas 5 classes de defeito (não achada conta como erro): 0.67
+F1 macro dos 5 tipos: 0.65
+Entre as defeituosas achadas, tipo certo em 74%

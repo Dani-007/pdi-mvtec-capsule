@@ -1,0 +1,14 @@
+atributos,decisao,acuracia_balanceada,precisao,recall,especificidade,f1_defeituosa,roc_auc
+valores,cascata (limiares),0.9307,0.9167,0.9083,0.9531,0.9124,0.9695
+valores,SVM,0.9247,0.9412,0.8807,0.9688,0.91,0.9786
+valores,RandomForest,0.9399,0.9182,0.9266,0.9531,0.9224,0.9819
+geometria,SVM,0.868,0.8273,0.8349,0.901,0.8311,0.9353
+geometria,RandomForest,0.8745,0.823,0.8532,0.8958,0.8378,0.9489
+textura,SVM,0.881,0.8667,0.8349,0.9271,0.8505,0.9522
+textura,RandomForest,0.8706,0.8349,0.8349,0.9062,0.8349,0.9376
+posicao,SVM,0.7274,0.6604,0.6422,0.8125,0.6512,0.7824
+posicao,RandomForest,0.7345,0.6698,0.6514,0.8177,0.6605,0.8078
+diferenca,SVM,0.6292,0.8611,0.2844,0.974,0.4276,0.6202
+diferenca,RandomForest,0.6318,0.8857,0.2844,0.9792,0.4306,0.6162
+completo,SVM,0.9203,0.8839,0.9083,0.9323,0.8959,0.978
+completo,RandomForest,0.9229,0.8919,0.9083,0.9375,0.9,0.9813

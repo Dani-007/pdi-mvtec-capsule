@@ -23,13 +23,17 @@ Protocolo (o mesmo das Etapas 2-5, "quem ajusta não dá nota"):
     - cada imagem de 'classificacao' é decidida uma vez, por limiares que não a viram.
 
 Saídas:
-    dados/especialistas.csv                     valor de cada especialista por imagem
+    dados/especialistas.csv                     valor de cada especialista por imagem (e, na
+                                                coluna poke_anterior, o do método anterior do
+                                                furinho, que não entra na cascata)
     dados/limiares_cascata.json                 limiares finais (todas as imagens), para uso
     dados/gerado/especialistas/*.png            máscaras de cada especialista (não versionado)
     resultados/etapa7/tabela_especialistas.txt  AUC de cada especialista x tipo de defeito
     resultados/etapa7/tabela_cascata.txt|csv    cascata em vários pontos de operação (ALFA)
     resultados/etapa7/disparos_por_tipo.txt     que etapa acusa cada tipo; tipo apontado
     resultados/etapa7/ablacao.txt               cascata sem cada etapa
+    resultados/etapa7/furinho_antes_depois.txt  furinho: top-hat (anterior) x LoG + circularidade
+    resultados/etapa7/furinho_log_otsu.png      passo a passo do especialista do furinho
     resultados/etapa7/localizacao.txt           máscara da cascata x ground truth
     resultados/etapa7/erros.csv                 falsos positivos e falsos negativos
     resultados/etapa7/*.png                     figuras
@@ -52,7 +56,8 @@ import cv2
 import numpy as np
 
 from especialistas import (
-    ESTAGIOS, NOMES, examinar, figura_passo_a_passo, referencias_do_banco,
+    CHAVE_FRACAO_CLARA, ESTAGIOS, FURINHO_AREA_MIN, NOMES, blobs_furinho, candidato_furinho_tophat,
+    diferenca_do_500, examinar, figura_passo_a_passo, preparar, referencias_do_banco,
 )
 from particao import carregar_particao
 from pipeline import DATASET_DIR, RAIZ, carregar_imagem, carregar_mascara_gt, metricas_pixel
@@ -96,10 +101,21 @@ def _chave(arquivo: str) -> str:
     return arquivo[:-4].replace("/", "_")
 
 
+COLUNA_ANTERIOR = "poke_anterior"   # valor do método anterior do furinho (top-hat 15 px)
+COLUNA_CLARA = CHAVE_FRACAO_CLARA   # fração clara da diferença do "500" (refina o tipo)
+EXTRAS = [COLUNA_ANTERIOR, COLUNA_CLARA]
+
+
 def _examinar_linha(l: dict) -> dict:
-    valores, mascaras = examinar(carregar_imagem(l["caminho"]), _REFS)
+    bgr = carregar_imagem(l["caminho"])
+    ctx = preparar(bgr)
+    valores, mascaras = examinar(bgr, _REFS, ctx)
     for nome, m in mascaras.items():
         cv2.imwrite(str(DIR_MASCARAS / f"{_chave(l['arquivo'])}__{nome}.png"), m)
+    # Só para a tabela "antes x depois": o método anterior do furinho não entra na cascata
+    valores[COLUNA_ANTERIOR] = candidato_furinho_tophat(ctx, _REFS)[0]
+    # Não entra na decisão normal x defeituosa: só ajuda a dizer o tipo quando a etapa 2 acusa
+    valores[COLUNA_CLARA] = diferenca_do_500(ctx, _REFS)[COLUNA_CLARA]
     return valores
 
 
@@ -112,7 +128,8 @@ def calcular_valores() -> list[dict]:
     valores = mapear(_examinar_linha, linhas, refs)
     saida = [{"arquivo": l["arquivo"], "tipo": l["tipo"], "rotulo": l["rotulo"],
               "conjunto": l["conjunto"], "fold": "" if l["fold"] is None else l["fold"],
-              **{e: round(v[e], 5) for e in ESTAGIOS}} for l, v in zip(linhas, valores)]
+              **{e: round(v[e], 5) for e in ESTAGIOS + EXTRAS}}
+             for l, v in zip(linhas, valores)]
     with open(CSV_VALORES, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(saida[0].keys()), lineterminator="\n")
         w.writeheader()
@@ -127,8 +144,9 @@ def carregar_valores() -> dict[str, np.ndarray]:
          "tipo": np.array([l["tipo"] for l in linhas]),
          "conjunto": np.array([l["conjunto"] for l in linhas]),
          "fold": np.array([int(l["fold"]) if l["fold"] != "" else -1 for l in linhas])}
-    for e in ESTAGIOS:
-        d[e] = np.array([float(l[e]) for l in linhas])
+    for e in ESTAGIOS + EXTRAS:
+        if e in linhas[0]:
+            d[e] = np.array([float(l[e]) for l in linhas])
     return d
 
 
@@ -151,12 +169,35 @@ def limiar_etapa(boas: np.ndarray, alvo: np.ndarray, alfa: float) -> float:
     return (a + float(acima.min())) / 2 if len(acima) else a
 
 
+def limiar_fracao_clara(d: dict, treino: np.ndarray, limiar_impressao: float) -> float:
+    """Quando a etapa 2 acusa: é impressão falha ou um furinho em cima do "500"?
+
+    Na impressão falha FALTA tinta: a cápsula fica mais escura que o modelo e a fração clara da
+    diferença é ~0. Um furo sobre a impressão expõe material mais claro. O corte é o que melhor
+    separa, no TREINO, as impressões falhas dos furinhos que a etapa 2 acusa (ponto médio entre
+    dois valores vizinhos; soma do acerto das duas classes). Sem exemplos das duas classes, o
+    corte é 1 (a fração nunca passa de 1, então nada é renomeado)."""
+    if COLUNA_CLARA not in d:
+        return 1.0
+    acusou = treino & (d["faulty_imprint"] > limiar_impressao)
+    falha = d[COLUNA_CLARA][acusou & (d["tipo"] == "faulty_imprint")]
+    furo = d[COLUNA_CLARA][acusou & (d["tipo"] == "poke")]
+    valores = np.unique(np.concatenate([falha, furo]))
+    if len(falha) == 0 or len(furo) == 0 or len(valores) < 2:
+        return 1.0
+    cortes = (valores[:-1] + valores[1:]) / 2
+    acerto = [np.mean(falha <= c) + np.mean(furo > c) for c in cortes]
+    return float(cortes[int(np.argmax(acerto))])
+
+
 def limiares(d: dict, treino: np.ndarray, alfa: float, margem: bool = True) -> dict[str, float]:
+    """Limiar de cada etapa e, na chave COLUNA_CLARA, o corte que refina o tipo da etapa 2."""
     boas = treino & (d["tipo"] == "good")
     saida = {}
     for e in ESTAGIOS:
         alvo = d[e][treino & (d["tipo"] == e)] if margem else np.array([])
         saida[e] = limiar_etapa(d[e][boas], alvo, alfa)
+    saida[COLUNA_CLARA] = limiar_fracao_clara(d, treino, saida["faulty_imprint"])
     return saida
 
 
@@ -164,19 +205,23 @@ def decidir(d: dict, alfa: float, estagios: list[str] = ESTAGIOS, margem: bool =
     """Validação cruzada: limiares no treino de cada rodada, decisão no fold de teste.
 
     Devolve, para as imagens de 'classificacao': disparo[n, etapa] (bool), razao[n, etapa]
-    (valor / limiar) e defeituosa[n]."""
+    (valor / limiar), defeituosa[n] e furo_no_500[n] (a diferença do "500" é clara: se a etapa
+    2 for a primeira a acusar, o tipo apontado é furinho, e não impressão falha)."""
     n = len(d["tipo"])
     cls = d["conjunto"] == "classificacao"
     razao = np.zeros((n, len(estagios)))
+    furo_no_500 = np.zeros(n, bool)
     for k in range(5):
         treino = (d["conjunto"] == "calibracao") | (cls & (d["fold"] != k))
         teste = cls & (d["fold"] == k)
         lim = limiares(d, treino, alfa, margem)
         for j, e in enumerate(estagios):
             razao[teste, j] = d[e][teste] / max(lim[e], 1e-9)
+        if COLUNA_CLARA in d:
+            furo_no_500[teste] = d[COLUNA_CLARA][teste] > lim[COLUNA_CLARA]
     disparo = razao > 1
     return {"disparo": disparo, "razao": razao, "defeituosa": disparo.any(1), "cls": cls,
-            "estagios": estagios}
+            "estagios": estagios, "furo_no_500": furo_no_500}
 
 
 def resumo(d: dict, r: dict) -> dict:
@@ -194,16 +239,34 @@ def resumo(d: dict, r: dict) -> dict:
     return s
 
 
-def tipo_apontado(r: dict) -> np.ndarray:
+def tipo_apontado(r: dict, refinar: bool = True) -> np.ndarray:
     """Tipo apontado = primeira etapa da cascata que acusa; 'good' se nenhuma acusa.
 
+    refinar: quando a primeira etapa a acusar é a da impressão e a diferença do "500" para o
+    modelo é CLARA (r["furo_no_500"]), o tipo é furinho: a impressão falha perde tinta e fica
+    mais escura; quem clareia a impressão é um furo em cima dela. refinar=False é a regra
+    simples (só a ordem das etapas).
+
     A ordem da cascata vai do especialista mais específico para o mais geral: amassado e
-    impressão quase só acusam o próprio defeito; furinho e arranhão medem contraste local e
-    também reagem aos outros defeitos, por isso ficam no fim."""
+    impressão quase só acusam o próprio defeito; o furinho acusa qualquer mancha compacta
+    (também as lascas da rachadura) e o arranhão mede contraste local fino e reage a quase
+    todos os defeitos, por isso ficam no fim."""
     ap = np.full(len(r["defeituosa"]), "good", dtype=object)
     for j in reversed(range(len(r["estagios"]))):
         ap[r["disparo"][:, j]] = r["estagios"][j]
+    if refinar and "poke" in r["estagios"]:
+        ap[(ap == "faulty_imprint") & r["furo_no_500"]] = "poke"
     return ap
+
+
+def f1_macro_tipos(verdadeiro: np.ndarray, apontado: np.ndarray) -> float:
+    """Média do F1 dos 5 tipos de defeito. Boa acusada conta como falso positivo do tipo
+    apontado; defeituosa não achada, como falso negativo do tipo verdadeiro."""
+    f1 = []
+    for t in TIPOS:
+        vp = np.sum((verdadeiro == t) & (apontado == t))
+        f1.append(2 * vp / max(np.sum(verdadeiro == t) + np.sum(apontado == t), 1))
+    return float(np.mean(f1))
 
 
 # =============================================================================
@@ -296,21 +359,29 @@ def tabela_disparos(d: dict, r: dict) -> str:
     txt.append(f"{'alguma etapa':<18}" + "".join(
         f"{int(r['defeituosa'][cls & (d['tipo'] == t)].sum()):>20d}" for t in tipos))
 
-    ap = tipo_apontado(r)
-    txt += ["", "Tipo apontado (primeira etapa da cascata que acusa) x tipo verdadeiro:", "",
-            f"{'verdadeiro':<18}" + "".join(f"{t:>16}" for t in tipos) + "   acerto"]
-    acertos = []
-    for t in tipos:
-        sel = cls & (d["tipo"] == t)
-        ac = float(np.mean(ap[sel] == t))
-        if t != "good":
-            acertos.append(ac)
-        txt.append(f"{t:<18}" + "".join(f"{int((ap[sel] == p).sum()):>16d}" for p in tipos)
-                   + f"{ac:9.2f}")
     ruins = cls & (d["tipo"] != "good") & r["defeituosa"]
-    txt += ["", f"Acurácia balanceada do tipo nas 5 classes de defeito (não achada conta como "
-                f"erro): {np.mean(acertos):.2f}",
-            f"Entre as defeituosas achadas, tipo certo em {np.mean(ap[ruins] == d['tipo'][ruins]):.0%}"]
+    for titulo, refinar in (
+            ("Tipo apontado x tipo verdadeiro. Regra: primeira etapa que acusa; se for a da "
+             "impressão e a\ndiferença do \"500\" para o modelo for clara, o tipo é furinho "
+             "(corte aprendido no treino):", True),
+            ("Regra simples, sem olhar a diferença do \"500\" (só a primeira etapa que acusa):",
+             False)):
+        ap = tipo_apontado(r, refinar)
+        txt += ["", titulo, "",
+                f"{'verdadeiro':<18}" + "".join(f"{t:>16}" for t in tipos) + "   acerto"]
+        acertos = []
+        for t in tipos:
+            sel = cls & (d["tipo"] == t)
+            ac = float(np.mean(ap[sel] == t))
+            if t != "good":
+                acertos.append(ac)
+            txt.append(f"{t:<18}" + "".join(f"{int((ap[sel] == p).sum()):>16d}" for p in tipos)
+                       + f"{ac:9.2f}")
+        txt += ["", f"Acurácia balanceada do tipo nas 5 classes de defeito (não achada conta "
+                    f"como erro): {np.mean(acertos):.2f}",
+                f"F1 macro dos 5 tipos: {f1_macro_tipos(d['tipo'][cls], ap[cls]):.2f}",
+                "Entre as defeituosas achadas, tipo certo em "
+                f"{np.mean(ap[ruins] == d['tipo'][ruins]):.0%}"]
     return "\n".join(txt)
 
 
@@ -330,6 +401,52 @@ def tabela_ablacao(d: dict) -> str:
     txt.append("")
     for e in ESTAGIOS:
         txt.append(linha(f"só {NOMES[e]}", [e]))
+    return "\n".join(txt)
+
+
+def tabela_furinho(d: dict) -> str:
+    """Etapa do furinho antes (top-hat 15 px, área da maior mancha) x depois (LoG + Otsu no
+    círculo + circularidade): a mesma cascata, trocando só o valor da etapa 4."""
+    antes = dict(d)
+    antes["poke"] = d[COLUNA_ANTERIOR]
+    cls = d["conjunto"] == "classificacao"
+    boas = cls & (d["tipo"] == "good")
+    tipos = ["good"] + TIPOS
+    j = ESTAGIOS.index("poke")
+    txt = ["Etapa do furinho: método anterior x LoG + Otsu no círculo + circularidade",
+           "anterior = top-hat/black-hat 15 px acima do envelope, área da maior mancha",
+           "depois   = resposta do LoG (3 escalas, acima do envelope) x circularidade da região do "
+           f"Otsu no círculo, área >= {FURINHO_AREA_MIN} px",
+           "tipo = primeira etapa que acusa (regra simples, sem o refinamento pela diferença "
+           "do \"500\")", "",
+           "AUC do valor da etapa para separar cada tipo das boas (0,50 = não reage ao tipo):",
+           f"{'':<10}" + "".join(f"{t:>16}" for t in TIPOS)]
+    for nome, dd in (("anterior", antes), ("depois", d)):
+        txt.append(f"{nome:<10}" + "".join(
+            f"{auc(dd['poke'][cls & (d['tipo'] == t)], dd['poke'][boas]):16.3f}" for t in TIPOS))
+    for alfa in (ALFA, ALFA_PRIORIZA):
+        txt += ["", f"ALFA = {alfa}",
+                f"{'':<10}{'espec.':>8}{'recall':>8}{'ac.bal.':>9}{'AUC':>7}{'tipo':>7}   "
+                "acerto do tipo: " + " / ".join(t[:7] for t in TIPOS)]
+        linhas_etapa, linhas_sem = [], []
+        for nome, dd in (("anterior", antes), ("depois", d)):
+            r = decidir(dd, alfa)
+            s = resumo(dd, r)
+            ap = tipo_apontado(r, refinar=False)
+            ac = [float(np.mean(ap[cls & (d["tipo"] == t)] == t)) for t in TIPOS]
+            txt.append(f"{nome:<10}{s['especificidade']:8.3f}{s['recall']:8.3f}"
+                       f"{s['acuracia_balanceada']:9.3f}{s['roc_auc']:7.3f}{np.mean(ac):7.2f}   "
+                       + " / ".join(f"{a:.2f}" for a in ac))
+            linhas_etapa.append(f"{nome:<10}" + "".join(
+                f"{int(r['disparo'][cls & (d['tipo'] == t), j].sum()):>16d}" for t in tipos))
+            sem = decidir(dd, alfa, [e for e in ESTAGIOS if e != "poke"])
+            so_ela = r["defeituosa"] & ~sem["defeituosa"] & cls
+            linhas_sem.append(f"{nome:<10}" + "".join(
+                f"{int((so_ela & (d['tipo'] == t)).sum()):>16d}" for t in tipos))
+        txt += ["", "  quantas cápsulas de cada tipo a etapa do furinho acusa:",
+                f"{'':<10}" + "".join(f"{t:>16}" for t in tipos)] + linhas_etapa
+        txt += ["", "  quantas só a etapa do furinho acusa (perdidas se ela for retirada):",
+                f"{'':<10}" + "".join(f"{t:>16}" for t in tipos)] + linhas_sem
     return "\n".join(txt)
 
 
@@ -455,9 +572,74 @@ def figura_disparos(d: dict, r: dict) -> None:
     plt.close(fig)
 
 
+def figura_furinho(refs) -> None:
+    """Passo a passo do especialista do furinho em 5 cápsulas: o que o método anterior marcava,
+    o LoG acima do envelope, a região do Otsu no círculo e a circularidade."""
+    import matplotlib.pyplot as plt
+
+    # (arquivo, comentário, onde centrar o recorte): "log" = blob que dá o valor; "pico" = maior
+    # pico do LoG, mesmo sem área mínima; "anterior" = maior mancha do método anterior
+    exemplos = [("test/poke/016.png", "furinho na tampa preta", "log"),
+                ("test/poke/014.png", "furinho na metade laranja", "log"),
+                ("test/scratch/008.png", "arranhão", "anterior"),
+                ("test/faulty_imprint/010.png", "impressão falha", "anterior"),
+                ("train/good/130.png", "boa com ponto de poeira", "pico")]
+    meio = 90
+    fig, eixos = plt.subplots(len(exemplos), 4, figsize=(13.5, 3.3 * len(exemplos)), facecolor=FUNDO)
+    for linha, (arq, nome, centro) in zip(eixos, exemplos):
+        bgr = carregar_imagem(DATASET_DIR / arq)
+        ctx = preparar(bgr)
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        area_ant, masc_ant = candidato_furinho_tophat(ctx, refs)
+        mapa, blobs = blobs_furinho(ctx, refs)
+        b = max(blobs, key=lambda b: (b["valor"], b["resposta"]))
+        if centro == "pico":
+            b = max(blobs, key=lambda b: b["resposta"])
+        if centro == "anterior":
+            n, _, stats, cent = cv2.connectedComponentsWithStats(masc_ant, connectivity=8)
+            cx, cy = cent[1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))]
+            perto = [k for k in blobs if abs(k["x"] - cx) < meio and abs(k["y"] - cy) < meio]
+            if perto:
+                b = max(perto, key=lambda k: (k["valor"], k["resposta"]))
+        if centro != "anterior":
+            cx, cy = b["x"], b["y"]
+        x0 = int(np.clip(cx - meio, 0, bgr.shape[1] - 2 * meio))
+        y0 = int(np.clip(cy - meio, 0, bgr.shape[0] - 2 * meio))
+        rec = lambda im: im[y0:y0 + 2 * meio, x0:x0 + 2 * meio]
+
+        linha[0].imshow(rec(rgb))
+        linha[0].set_title(f"{arq[:-4]}\n{nome}", fontsize=10, color=TINTA)
+        ant = (rgb * 0.6).astype(np.uint8)
+        ant[masc_ant > 0] = (255, 60, 60)
+        linha[1].imshow(rec(ant))
+        linha[1].set_title(f"anterior: top-hat/black-hat 15 px\nmaior mancha = {area_ant:.0f} px",
+                           fontsize=10, color=TINTA)
+        linha[2].imshow(rec(mapa), cmap="magma", vmin=0, vmax=max(20.0, float(rec(mapa).max())))
+        linha[2].set_title(f"LoG acima do envelope\npico = {b['resposta']:.1f}  "
+                           f"(sigma = {b['sigma']} px)", fontsize=10, color=TINTA)
+        seg = rgb.copy()
+        seg[b["regiao"] > 0] = (0.45 * seg[b["regiao"] > 0] + 0.55 * np.array([0, 229, 255])).astype(np.uint8)
+        linha[3].imshow(rec(seg))
+        linha[3].add_patch(plt.Circle((b["x"] - x0, b["y"] - y0), b["raio"], fill=False,
+                                      color="white", linewidth=1.2))
+        pequeno = b["area"] < FURINHO_AREA_MIN
+        linha[3].set_title(f"Otsu no círculo: área {b['area']:.0f} px"
+                           + (f" (< {FURINHO_AREA_MIN})" if pequeno else "")
+                           + f"\ncircularidade {b['circularidade']:.2f}  ->  valor = {b['valor']:.1f}",
+                           fontsize=10, color=TINTA)
+        for ax in linha:
+            ax.axis("off")
+    fig.suptitle("Especialista do furinho: Laplaciano da Gaussiana, Otsu no círculo e circularidade",
+                 fontsize=13, color=TINTA, x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.975))
+    fig.savefig(DIR_RESULT / "furinho_log_otsu.png", dpi=90, facecolor=FUNDO)
+    plt.close(fig)
+
+
 def figuras_exemplos(d: dict, r: dict, lim: dict[str, float], fp: list[int], fn: list[int]) -> None:
     """Passo a passo de um exemplo por tipo e dos erros mais claros."""
     refs = referencias_do_banco()
+    figura_furinho(refs)
     exemplos = ["test/squeeze/002.png", "test/faulty_imprint/000.png", "test/crack/010.png",
                 "test/poke/001.png", "test/scratch/009.png", "test/good/005.png"]
     for nome, lista in [("exemplo", exemplos),
@@ -485,6 +667,9 @@ def main() -> None:
     if args.recalcular or not CSV_VALORES.exists() or not DIR_MASCARAS.exists():
         calcular_valores()
     d = carregar_valores()
+    if any(c not in d for c in EXTRAS):
+        print(f"Aviso: {CSV_VALORES.name} não tem as colunas {EXTRAS}; rode com --recalcular "
+              "para gerar furinho_antes_depois.txt e refinar o tipo pela diferença do \"500\"")
 
     def salvar(nome: str, texto: str) -> None:
         (DIR_RESULT / nome).write_text(texto + "\n", encoding="utf-8")
@@ -502,6 +687,8 @@ def main() -> None:
     r = decidir(d, ALFA)
     salvar("disparos_por_tipo.txt", tabela_disparos(d, r))
     salvar("ablacao.txt", tabela_ablacao(d))
+    if COLUNA_ANTERIOR in d:
+        salvar("furinho_antes_depois.txt", tabela_furinho(d))
     salvar("localizacao.txt", avaliar_localizacao(d, r))
     fp, fn = salvar_erros(d, r)
     print(f"\nErros (ALFA = {ALFA}): {len(fp)} boas rejeitadas e {len(fn)} defeituosas aprovadas "
@@ -512,7 +699,8 @@ def main() -> None:
     finais = {f"alfa_{a}": limiares(d, todas, a) for a in (ALFA, ALFA_PRIORIZA)}
     JSON_LIMIARES.write_text(json.dumps(finais, indent=2) + "\n", encoding="utf-8")
     print("Limiares finais (todas as imagens), ALFA =", ALFA, ":",
-          {NOMES[e]: round(v, 3) for e, v in finais[f"alfa_{ALFA}"].items()})
+          {NOMES[e]: round(finais[f"alfa_{ALFA}"][e], 3) for e in ESTAGIOS},
+          "| fração clara do \"500\":", round(finais[f"alfa_{ALFA}"][COLUNA_CLARA], 3))
 
     if not args.sem_figuras:
         figura_operacao(linhas)

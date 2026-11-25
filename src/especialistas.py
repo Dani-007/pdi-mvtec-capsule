@@ -13,8 +13,10 @@ maior, mais suspeita) e uma máscara com a região que ele acusou:
     3. crack (rachadura)        a tampa preta lasca e deixa o laranja à mostra (ou sai pó branco).
                                 Segmenta preto x laranja pela COR (Otsu no canal a* do Lab) e
                                 compara a forma da tampa com a de cápsulas boas (fora do "500").
-    4. poke (furinho)           mancha compacta com contraste local. Top-hat e black-hat de 15 px,
-                                descontando o que as cápsulas boas também têm; maior mancha.
+    4. poke (furinho)           mancha COMPACTA e arredondada. Laplaciano da Gaussiana (LoG) em 3
+                                escalas acha os "blobs"; Otsu num círculo em volta de cada pico
+                                segmenta a mancha; a circularidade separa o furo de riscos e
+                                pontos finos. Valor = resposta do LoG x circularidade.
     5. scratch (arranhão)       feixe de riscos finos e claros, de baixo contraste. Top-hat de
                                 9 px com limiar baixo; conta os fragmentos numa janela de 101 px.
 
@@ -25,9 +27,10 @@ Peças comuns:
       modelos do "500" e os envelopes).
     - Envelope: as cápsulas boas também têm estruturas claras/escuras finas (a linha de reflexo
       no meio, a marca do molde, linhas internas), sempre no mesmo lugar. O envelope é o MÁXIMO
-      do top-hat nas 30 boas do banco, dilatado 9 px (tolerância de posição). Só o que passa do
-      envelope conta como suspeito. O "500" e o logo mudam de lugar (a cápsula gira), então
-      ficam fora da zona válida: o "500" é do especialista 2 e o logo é variação normal.
+      do top-hat (e do LoG, no especialista 4) nas 30 boas do banco, dilatado 9 px (tolerância
+      de posição). Só o que passa do envelope conta como suspeito. O "500" e o logo mudam de
+      lugar (a cápsula gira), então ficam fora da zona válida: o "500" é do especialista 2 e
+      o logo é variação normal.
 
 A pose da cápsula é estável na base (centro +-3 px, ângulo +-0,3 grau, tampa preta sempre à
 esquerda), então o alinhamento com as referências é só uma translação pelo centroide.
@@ -98,19 +101,53 @@ IMP_BUSCA_ALGARISMO = 6    # ajuste fino de cada algarismo (o giro "achata" a im
 IMP_TOLERANCIA_LARGURA = 6 # modelos válidos: largura do "500" a até 6 px da mediana do banco
 IMP_LIMIAR_MASCARA = 30    # |teste - modelo| > 30 marca a região (mesmo limiar da Etapa 1)
 
+KMEANS_SEMENTE = 42        # candidato k-means: sementes fixas, para repetir o resultado
+
 # --- 3. Rachadura ------------------------------------------------------------------
 # Abertura 9x9 no XOR das tampas: a borda da região laranja é menos nítida que a silhueta
 #   (sombra na base da cápsula), então a casca normal é mais grossa que no squeeze.
 RACHADURA_ABERTURA = 9
 
-# --- 4. Furinho --------------------------------------------------------------------
-# Elemento de 15 px: o top-hat guarda estruturas mais estreitas que 15 px (o brilho e a
-#   sombra de um furo; os furos têm 30-60 px, com detalhes internos de 5-15 px).
-# Limiar 6: o resíduo acima do envelope, nas boas de calibração, fica quase todo abaixo disso.
-FURINHO_K = 15
-FURINHO_LIMIAR = 6
-FURINHO_FECHAMENTO = 5     # junta a parte clara e a parte escura do mesmo furo
-FURINHO_ABERTURA = 3       # remove pontos isolados
+# --- 4. Furinho: LoG + Otsu no círculo + circularidade (sugestão do professor) -------
+# O LoG (sigma² x Laplaciano da imagem suavizada por uma Gaussiana) é um detector de "blobs":
+#   responde no centro de manchas arredondadas de raio ~ sigma x raiz(2) e pouco a riscos finos
+#   (a resposta a um risco de largura w cai com w/sigma). Por isso ele já separa o furo do
+#   arranhão na detecção.
+# Escalas 6, 9 e 13 px: blobs de ~17, 25 e 37 px de diâmetro (os furos têm 30-60 px, com
+#   detalhes internos de 5-15 px). Medido com cada escala sozinha, furinhos acima do percentil
+#   98 das boas: sigma 4 -> 6 de 21; 6 -> 10; 9 -> 11; 13 -> 12; 18 -> 8. Com sigma = 4 entram
+#   os pontos de poeira; com 13 sozinho, 15 dos 20 amassados também são acusados.
+# Raio do círculo = 3 sigma: o blob de raio 1,4 sigma ocupa ~1/4 da janela, e o Otsu separa
+#   bem duas classes quando a menor não é minúscula.
+# Suporte mínimo 0,5: o LoG só vale onde pelo menos metade do peso da Gaussiana cai em pixels
+#   da zona de busca (evita tiras estreitas entre o "500" e o contorno).
+# Margem de 6 px em volta do recorte do "500" (que já tem 8 px de borda): dentro do retângulo
+#   da impressão quem responde é o especialista 2. A máscara do "500" sozinha não basta: em
+#   parte das boas ela perde um pedaço do "5", que vira um blob claro de ~40 px.
+# Área mínima 150 px (disco de ~14 px): os pontos de poeira das cápsulas boas são blobs
+#   perfeitos (circularidade ~0,9), mas pequenos: ~80-110 px. Com 100 px a etapa volta a
+#   acusar 3 arranhões (em vez de 1); com 200 ou 250 px a cascata dá o mesmo resultado.
+# Fechamento 5 + abertura 3 na máscara do Otsu: tapa os pontos escuros dentro do furo e tira
+#   os pixels soltos antes de medir o perímetro.
+FURINHO_SIGMAS = (6, 9, 13)
+FURINHO_RAIO_EM_SIGMAS = 3
+FURINHO_SUPORTE_MIN = 0.5
+FURINHO_MARGEM_500 = 6
+FURINHO_CANDIDATOS = 5     # picos do LoG examinados por imagem
+FURINHO_AREA_MIN = 150
+FURINHO_FECHAMENTO = 5
+FURINHO_ABERTURA = 3
+
+# Candidato "crescimento de região" (segmentação por regiões, no lugar do Otsu no círculo):
+#   a partir do pico do LoG, entram os vizinhos com cinza a até 10 níveis do pico (o ruído
+#   tem 5-15 níveis e as bordas de defeito >= 30). Testado com 6, 10 e 15: 5, 8 e 9 furinhos
+#   acima do percentil 98 das boas, contra 12 do Otsu no círculo.
+FURINHO_TOLERANCIA_REGIAO = 10
+
+# Método anterior do furinho (mantido como candidato na tabela de comparação): top-hat e
+#   black-hat de 15 px acima do envelope, limiar 6, fechamento 5 + abertura 3, maior mancha.
+TOPHAT_FURINHO_K = 15
+TOPHAT_FURINHO_LIMIAR = 6
 
 # --- 5. Arranhão -------------------------------------------------------------------
 # Os riscos têm 2-5 px de largura e só 3-10 níveis de cinza de contraste. Por isso: elemento
@@ -169,6 +206,7 @@ class Contexto:
     impressao: np.ndarray      # máscara do "500"
     logo: np.ndarray           # zona do logo (vazia se ele não aparece)
     valida: np.ndarray         # bool: onde os especialistas 4 e 5 procuram
+    cache: dict = field(default_factory=dict)   # resultados reusados entre especialistas
 
 
 def segmentar_laranja(bgr: np.ndarray, capsula: np.ndarray, canal: str = "a") -> np.ndarray:
@@ -178,7 +216,21 @@ def segmentar_laranja(bgr: np.ndarray, capsula: np.ndarray, canal: str = "a") ->
     logo cinza e o pó branco têm a* baixo, então os três caem no lado "não laranja" e o logo
     não fura a tampa preta. canal 'cinza' é o candidato descartado: o limiar de Otsu no cinza
     cai entre o logo e o laranja escuro da borda, e a forma da tampa passa a depender do logo.
+    canal 'kmeans' é outro candidato descartado: k-means com 2 grupos no plano (a*, b*); o
+    grupo de a* maior é o laranja. Dá quase a mesma máscara do Otsu no a*, sem ganho.
     """
+    if canal == "kmeans":
+        dentro = capsula > 0
+        if not dentro.any():
+            return np.zeros_like(capsula)
+        lab = cv2.GaussianBlur(cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB), (5, 5), 0)
+        cv2.setRNGSeed(KMEANS_SEMENTE)
+        _, rotulos, centros = cv2.kmeans(
+            lab[dentro][:, 1:3].astype(np.float32), 2, None,
+            (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.5), 3, cv2.KMEANS_PP_CENTERS)
+        laranja = np.zeros_like(capsula)
+        laranja[dentro] = np.where(rotulos.ravel() == int(np.argmax(centros[:, 0])), 255, 0)
+        return laranja
     if canal == "a":
         c = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)[..., 1]
     else:
@@ -192,16 +244,22 @@ def segmentar_laranja(bgr: np.ndarray, capsula: np.ndarray, canal: str = "a") ->
 
 
 def coluna_divisa(cinza: np.ndarray, capsula: np.ndarray) -> int:
-    """Primeira coluna (da esquerda para a direita) em que menos da metade da cápsula é preta.
-    Na base, a tampa preta está sempre à esquerda."""
+    """Coluna seguinte à última em que mais da metade da cápsula é preta.
+    Na base, a tampa preta está sempre à esquerda.
+
+    A regra anterior (primeira coluna, da esquerda para a direita, com menos da metade preta)
+    parava na ponta arredondada da tampa em 17 das 351 imagens: o brilho da ponta deixa as
+    primeiras colunas com cinza >= 60, a divisa saía em x ~ 85 em vez de ~ 515 e a faixa da
+    divisa não era tirada da zona válida. Nas outras 334 imagens as duas regras dão a mesma
+    coluna."""
     dentro = capsula > 0
     altura = dentro.sum(0)
     frac_preta = ((cinza < LIMIAR_PRETO) & dentro).sum(0) / np.maximum(altura, 1)
     xs = np.where(altura > 100)[0]
     if len(xs) == 0:
         return cinza.shape[1] // 2
-    claras = xs[frac_preta[xs] < 0.5]
-    return int(claras[0]) if len(claras) else int(xs[len(xs) // 2])
+    pretas = xs[frac_preta[xs] >= 0.5]
+    return int(pretas[-1]) + 1 if len(pretas) else int(xs[len(xs) // 2])
 
 
 def zona_logo(cinza: np.ndarray, capsula: np.ndarray) -> np.ndarray:
@@ -285,10 +343,15 @@ def _modelos_500(ctxs: list[Contexto]) -> list[dict]:
     return modelos
 
 
-def construir_referencias(caminhos: list[Path], ks_claro: tuple[int, ...] = (ARRANHAO_K, FURINHO_K),
-                          ks_escuro: tuple[int, ...] = (FURINHO_K,),
+def construir_referencias(caminhos: list[Path],
+                          ks_claro: tuple[int, ...] = (ARRANHAO_K, TOPHAT_FURINHO_K),
+                          ks_escuro: tuple[int, ...] = (TOPHAT_FURINHO_K,),
                           tolerancia: int = TOLERANCIA_ENVELOPE) -> Referencias:
-    """Monta as referências com as cápsulas boas do banco (30 imagens, ~15 s)."""
+    """Monta as referências com as cápsulas boas do banco (30 imagens, ~20 s).
+
+    ks_claro/ks_escuro: tamanhos dos envelopes de top-hat/black-hat (arranhão e método
+    anterior do furinho, que cascata.py mantém para a tabela "antes x depois"). Os envelopes
+    do LoG (especialista 4) são sempre montados."""
     ctxs = [preparar(carregar_imagem(c)) for c in caminhos]
     centro = tuple(np.mean([c.centro for c in ctxs], axis=0))
     refs = Referencias(
@@ -313,6 +376,15 @@ def construir_referencias(caminhos: list[Path], ks_claro: tuple[int, ...] = (ARR
         refs.envelopes[("claro", k)] = envelope(realce_claro, k)
     for k in ks_escuro:
         refs.envelopes[("escuro", k)] = envelope(realce_escuro, k)
+
+    # Envelopes do LoG: o máximo, nas boas, da resposta a blobs claros e escuros em cada escala
+    for c in ctxs:
+        for chave, m in mapas_log(c, zona_blob(c, refs)).items():
+            m = _deslocar(cv2.dilate(m, _ee(tolerancia)),
+                          centro[0] - c.centro[0], centro[1] - c.centro[1])
+            refs.envelopes[chave] = m if chave not in refs.envelopes else np.maximum(
+                refs.envelopes[chave], m)
+        c.cache.clear()
     return refs
 
 
@@ -400,15 +472,23 @@ def _casar_500(ctx: Contexto, modelo: dict) -> tuple[float, float, tuple[int, in
     return inteiro, pior, (px, py)
 
 
-def especialista_impressao(ctx: Contexto, refs: Referencias,
-                           por_algarismo: bool = True) -> tuple[float, np.ndarray]:
+def _casamentos_500(ctx: Contexto, refs: Referencias) -> list[tuple]:
+    """(modelo, correlação do "500" inteiro, correlação do pior algarismo, posição) para cada
+    modelo do banco. Calculado uma vez por imagem: os especialistas 2 e 4 usam."""
+    if "casamentos_500" not in ctx.cache:
+        ctx.cache["casamentos_500"] = [(m, *_casar_500(ctx, m)) for m in refs.modelos_500]
+    return ctx.cache["casamentos_500"]
+
+
+def especialista_impressao(ctx: Contexto, refs: Referencias, por_algarismo: bool = True,
+                           abrir: bool = True) -> tuple[float, np.ndarray]:
     """1 - correlação do pior algarismo, com o modelo do banco que melhor casa.
 
     por_algarismo=False é o candidato descartado (correlação do "500" inteiro): uma falha num
-    algarismo só muda 1/3 da área casada e a correlação cai pouco."""
+    algarismo só muda 1/3 da área casada e a correlação cai pouco. abrir=False deixa a
+    máscara sem a abertura 3x3 (só para medir o efeito da morfologia)."""
     melhor, modelo_m, pos_m = -1.0, None, (0, 0)
-    for modelo in refs.modelos_500:
-        inteiro, pior, pos = _casar_500(ctx, modelo)
+    for modelo, inteiro, pior, pos in _casamentos_500(ctx, refs):
         valor = pior if por_algarismo else inteiro
         if valor > melhor:
             melhor, modelo_m, pos_m = valor, modelo, pos
@@ -420,8 +500,46 @@ def especialista_impressao(ctx: Contexto, refs: Referencias,
         if recorte.shape == t.shape:
             dif = np.where(cv2.absdiff(recorte, t) > IMP_LIMIAR_MASCARA, 255, 0).astype(np.uint8)
             mascara[py:py + t.shape[0], px:px + t.shape[1]] = cv2.morphologyEx(
-                dif, cv2.MORPH_OPEN, _ee(3))
+                dif, cv2.MORPH_OPEN, _ee(3)) if abrir else dif
     return 1.0 - melhor, mascara
+
+
+CHAVE_FRACAO_CLARA = "dif500_frac_clara"   # coluna/limiar usados por cascata.py para o tipo
+
+
+def diferenca_do_500(ctx: Contexto, refs: Referencias) -> dict[str, float]:
+    """Atributos da diferença entre o "500" da cápsula e o modelo do banco que melhor casa
+    (o mesmo modelo do especialista 2), para a ficha de classificacao_cascata.py.
+
+    O sinal da diferença diz O QUE mudou na impressão: na impressão falha FALTA tinta, então
+    a cápsula fica mais escura que o modelo, em cima dos traços; um furo ou uma lasca sobre o
+    "500" expõe material mais claro, também fora dos traços. Tinta do modelo = Otsu no recorte
+    do modelo; conta só |diferença| > IMP_LIMIAR_MASCARA, depois de uma abertura 3x3.
+
+        dif500_area          pixels com diferença
+        dif500_frac_clara    fração deles em que a cápsula está mais clara que o modelo
+        dif500_claro_fora    pixels mais claros FORA dos traços do modelo
+        dif500_escuro_tinta  pixels mais escuros SOBRE os traços do modelo"""
+    f = {"dif500_area": 0.0, "dif500_frac_clara": 0.0, "dif500_claro_fora": 0.0,
+         "dif500_escuro_tinta": 0.0}
+    casos = _casamentos_500(ctx, refs)
+    if not casos:
+        return f
+    modelo, _, _, (px, py) = max(casos, key=lambda c: c[2])
+    t = modelo["imagem"]
+    recorte = ctx.cinza[py:py + t.shape[0], px:px + t.shape[1]]
+    if recorte.shape != t.shape:
+        return f
+    dif = recorte.astype(np.int16) - t.astype(np.int16)
+    tinta = cv2.threshold(t, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1] > 0
+    mudou = np.where(np.abs(dif) > IMP_LIMIAR_MASCARA, 255, 0).astype(np.uint8)
+    mudou = cv2.morphologyEx(mudou, cv2.MORPH_OPEN, _ee(3)) > 0
+    if mudou.any():
+        f.update({"dif500_area": float(mudou.sum()),
+                  "dif500_frac_clara": float((dif[mudou] > 0).mean()),
+                  "dif500_claro_fora": float((mudou & (dif > 0) & ~tinta).sum()),
+                  "dif500_escuro_tinta": float((mudou & (dif < 0) & tinta).sum())})
+    return f
 
 
 def candidato_impressao_area(ctx: Contexto, refs: Referencias) -> float:
@@ -452,17 +570,196 @@ def especialista_rachadura(ctx: Contexto, refs: Referencias, abertura: int = RAC
 
 
 # =============================================================================
-# 4. FURINHO: manchas de contraste local
+# 4. FURINHO: blobs do LoG, Otsu no círculo e circularidade
 # =============================================================================
-def especialista_furinho(ctx: Contexto, refs: Referencias, k: int = FURINHO_K,
-                         limiar: int = FURINHO_LIMIAR,
-                         usar_envelope: bool = True) -> tuple[float, np.ndarray]:
+def zona_blob(ctx: Contexto, refs: Referencias) -> np.ndarray:
+    """Onde o especialista 4 procura: a zona válida menos o retângulo em que o "500" casou
+    com o modelo mais parecido do banco (o mesmo casamento do especialista 2)."""
+    if "zona_blob" not in ctx.cache:
+        zona = ctx.valida.copy()
+        casos = _casamentos_500(ctx, refs)
+        if casos:
+            modelo, _, _, (px, py) = max(casos, key=lambda c: c[1])
+            th, tw = modelo["imagem"].shape
+            m = FURINHO_MARGEM_500
+            zona[max(py - m, 0):py + th + m, max(px - m, 0):px + tw + m] = False
+        ctx.cache["zona_blob"] = zona
+    return ctx.cache["zona_blob"]
+
+
+def realce_log(ctx: Contexto, zona: np.ndarray, sigma: float) -> np.ndarray:
+    """Laplaciano da Gaussiana normalizado em escala: -sigma² x Laplaciano(G_sigma * imagem).
+    Positivo no centro de um blob CLARO, negativo no de um blob ESCURO.
+
+    A Gaussiana é calculada só com os pixels da zona de busca (média ponderada: soma dos
+    vizinhos válidos / soma dos pesos válidos), separadamente de cada lado da divisa. Sem
+    isso, os degraus fortes que não são defeito (fundo, tampa preta, "500", logo) vazam para
+    dentro da zona, porque a Gaussiana de sigma = 13 alcança ~40 px."""
+    img = ctx.suave.astype(np.float32)
+    saida = np.zeros_like(img)
+    esquerda = np.arange(img.shape[1]) < ctx.x_divisa
+    for lado in (esquerda, ~esquerda):
+        m = (zona & lado[None, :]).astype(np.float32)
+        peso = cv2.GaussianBlur(m, (0, 0), sigma)
+        media = cv2.GaussianBlur(img * m, (0, 0), sigma) / np.maximum(peso, 1e-3)
+        log = -(sigma ** 2) * cv2.Laplacian(media, cv2.CV_32F, ksize=1)
+        ok = (m > 0) & (peso > FURINHO_SUPORTE_MIN)
+        saida[ok] = log[ok]
+    return saida
+
+
+def mapas_log(ctx: Contexto, zona: np.ndarray,
+              sigmas: tuple[int, ...] = FURINHO_SIGMAS) -> dict[tuple[str, int], np.ndarray]:
+    """Resposta a blobs claros e a blobs escuros em cada escala (mapas >= 0)."""
+    mapas = {}
+    for s in sigmas:
+        log = realce_log(ctx, zona, s)
+        mapas[("log_claro", s)] = np.maximum(log, 0)
+        mapas[("log_escuro", s)] = np.maximum(-log, 0)
+    return mapas
+
+
+def circularidade(regiao: np.ndarray) -> tuple[float, float]:
+    """(área, 4 pi A / P²) do contorno externo da região: 1 = círculo; um risco de 4 px de
+    largura que atravessa uma janela de 60 px dá ~0,2."""
+    contornos, _ = cv2.findContours(regiao, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contornos:
+        return 0.0, 0.0
+    c = max(contornos, key=cv2.contourArea)
+    area, perim = cv2.contourArea(c), cv2.arcLength(c, True)
+    return float(area), float(min(4 * np.pi * area / max(perim ** 2, 1.0), 1.0))
+
+
+def otsu_no_circulo(ctx: Contexto, zona: np.ndarray, x: int, y: int, raio: int, claro: bool,
+                    morfologia: bool = True,
+                    segmentacao: str = "otsu") -> tuple[np.ndarray, float, float]:
+    """Segmenta a mancha em volta do pico (x, y) do LoG: Otsu dos tons de cinza dentro do
+    círculo (só pixels da zona de busca, do mesmo lado da divisa). O LoG diz ONDE está o blob
+    e se ele é claro ou escuro; o Otsu, limitado ao círculo, acha o limiar entre a mancha e a
+    vizinhança dela (um Otsu na cápsula inteira separaria preto x laranja).
+
+    Devolve (região, área, circularidade). A região é o componente da classe do blob que toca
+    o disco central (raio/4).
+
+    morfologia=False tira o fechamento e a abertura (só para medir o efeito da morfologia).
+    segmentacao="regiao" é o candidato descartado: crescimento de região a partir do pico
+    (vizinhos com cinza a até FURINHO_TOLERANCIA_REGIAO níveis do pico), dentro do círculo."""
+    h, w = ctx.cinza.shape
+    regiao = np.zeros((h, w), np.uint8)
+    y0, y1, x0, x1 = max(y - raio, 0), min(y + raio + 1, h), max(x - raio, 0), min(x + raio + 1, w)
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    dist2 = (xx - x) ** 2 + (yy - y) ** 2
+    janela = (dist2 <= raio ** 2) & zona[y0:y1, x0:x1] & ((xx < ctx.x_divisa) == (x < ctx.x_divisa))
+    recorte = ctx.cinza[y0:y1, x0:x1]
+    tons = recorte[janela]
+    if len(tons) < 20 or tons.min() == tons.max():
+        return regiao, 0.0, 0.0
+    if segmentacao == "regiao":
+        if not janela[y - y0, x - x0]:
+            return regiao, 0.0, 0.0
+        barreira = np.ones((recorte.shape[0] + 2, recorte.shape[1] + 2), np.uint8)
+        barreira[1:-1, 1:-1] = np.where(janela, 0, 1)
+        tol = FURINHO_TOLERANCIA_REGIAO
+        cv2.floodFill(np.ascontiguousarray(recorte), barreira, (x - x0, y - y0), 0, tol, tol,
+                      4 | cv2.FLOODFILL_MASK_ONLY | cv2.FLOODFILL_FIXED_RANGE | (255 << 8))
+        binaria = np.where(barreira[1:-1, 1:-1] == 255, 255, 0).astype(np.uint8)
+    else:
+        t, _ = cv2.threshold(tons.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        classe = (recorte > t) if claro else (recorte <= t)
+        binaria = np.where(classe & janela, 255, 0).astype(np.uint8)
+    if morfologia:
+        binaria = cv2.morphologyEx(binaria, cv2.MORPH_CLOSE, _ee(FURINHO_FECHAMENTO))
+        binaria = cv2.morphologyEx(binaria, cv2.MORPH_OPEN, _ee(FURINHO_ABERTURA))
+    binaria[~janela] = 0
+    n, rotulos, stats, _ = cv2.connectedComponentsWithStats(binaria, connectivity=8)
+    centrais = np.unique(rotulos[(dist2 <= max(raio // 4, 2) ** 2) & (rotulos > 0)])
+    if len(centrais) == 0:
+        return regiao, 0.0, 0.0
+    i = max(centrais, key=lambda j: stats[j, cv2.CC_STAT_AREA])
+    regiao[y0:y1, x0:x1][rotulos == i] = 255
+    area, circ = circularidade(regiao[y0:y1, x0:x1])
+    return regiao, area, circ
+
+
+def blobs_furinho(ctx: Contexto, refs: Referencias, sigmas: tuple[int, ...] = FURINHO_SIGMAS,
+                  morfologia: bool = True,
+                  segmentacao: str = "otsu") -> tuple[np.ndarray, list[dict]]:
+    """Mapa do LoG acima do envelope (máximo entre escalas e entre claro/escuro) e os blobs
+    candidatos: os FURINHO_CANDIDATOS maiores picos, cada um com a região do Otsu no círculo.
+
+    Cada blob: x, y, sigma, claro, raio, resposta (pico do LoG acima do envelope), regiao,
+    area, circularidade e valor = resposta x circularidade (0 se a área for menor que a
+    mínima)."""
+    zona = zona_blob(ctx, refs)
+    dx, dy = ctx.centro[0] - refs.centro_medio[0], ctx.centro[1] - refs.centro_medio[1]
+    chaves, pilha = [], []
+    for chave, m in mapas_log(ctx, zona, sigmas).items():
+        chaves.append(chave)
+        pilha.append(np.maximum(m - _deslocar(refs.envelopes[chave], dx, dy), 0) * zona)
+    pilha = np.stack(pilha)
+    mapa, qual = pilha.max(0), pilha.argmax(0)
+
+    resto = mapa.copy()
+    blobs = []
+    for _ in range(FURINHO_CANDIDATOS):
+        _, resposta, _, (x, y) = cv2.minMaxLoc(resto)
+        if resposta <= 0:
+            break
+        tipo, sigma = chaves[qual[y, x]]
+        raio = int(round(FURINHO_RAIO_EM_SIGMAS * sigma))
+        regiao, area, circ = otsu_no_circulo(ctx, zona, x, y, raio, tipo == "log_claro",
+                                             morfologia, segmentacao)
+        blobs.append({"x": x, "y": y, "sigma": sigma, "claro": tipo == "log_claro", "raio": raio,
+                      "resposta": float(resposta), "regiao": regiao, "area": area,
+                      "circularidade": circ,
+                      "valor": float(resposta) * circ if area >= FURINHO_AREA_MIN else 0.0})
+        cv2.circle(resto, (x, y), raio, 0, -1)   # o próximo pico vem de outro lugar
+    return mapa, blobs
+
+
+def especialista_furinho(ctx: Contexto, refs: Referencias, usar_forma: bool = True,
+                         morfologia: bool = True,
+                         segmentacao: str = "otsu") -> tuple[float, np.ndarray]:
+    """Maior (resposta do LoG x circularidade) entre os blobs com área >= FURINHO_AREA_MIN; a
+    máscara é a região do Otsu desse blob.
+
+    usar_forma=False é o candidato "só o LoG": o maior pico acima do envelope, sem o Otsu no
+    círculo, a circularidade e a área mínima."""
+    mapa, blobs = blobs_furinho(ctx, refs, morfologia=morfologia, segmentacao=segmentacao)
+    if not usar_forma:
+        mascara = blobs[0]["regiao"] if blobs else np.zeros_like(ctx.cinza)
+        return float(mapa.max()), mascara
+    melhor = max(blobs, key=lambda b: b["valor"], default=None)
+    if melhor is None or melhor["valor"] <= 0:
+        return 0.0, np.zeros_like(ctx.cinza)
+    return melhor["valor"], melhor["regiao"]
+
+
+def candidato_furinho_tophat(ctx: Contexto, refs: Referencias, k: int = TOPHAT_FURINHO_K,
+                             limiar: int = TOPHAT_FURINHO_LIMIAR, usar_envelope: bool = True,
+                             circ_min: float = 0.0) -> tuple[float, np.ndarray]:
+    """Método anterior do furinho (candidato): top-hat e black-hat de k px acima do envelope,
+    limiar, fechamento + abertura; valor = área da maior mancha.
+
+    Ele mede contraste local, e não forma: acusava também arranhões, impressões falhas e
+    rachaduras, e tudo o que achava os outros especialistas também achavam. circ_min > 0 conta
+    só as manchas com circularidade >= circ_min (candidato "circularidade sem o LoG": a máscara
+    do top-hat sai picotada e mesmo os furos têm circularidade baixa)."""
     claro = acima_do_envelope(ctx, refs, "claro", k, usar_envelope)
     escuro = acima_do_envelope(ctx, refs, "escuro", k, usar_envelope)
     mascara = np.where((claro > limiar) | (escuro > limiar), 255, 0).astype(np.uint8)
     mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, _ee(FURINHO_FECHAMENTO))
     mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, _ee(FURINHO_ABERTURA))
-    return _maior_componente(mascara), mascara
+    if circ_min <= 0:
+        return _maior_componente(mascara), mascara
+    n, rotulos, stats, _ = cv2.connectedComponentsWithStats(mascara, connectivity=8)
+    maior = 0.0
+    for i in range(1, n):
+        x, y, w, h = stats[i, :4]
+        mancha = np.where(rotulos[y:y + h, x:x + w] == i, 255, 0).astype(np.uint8)
+        if circularidade(mancha)[1] >= circ_min:
+            maior = max(maior, float(stats[i, cv2.CC_STAT_AREA]))
+    return maior, mascara
 
 
 # =============================================================================
@@ -477,17 +774,22 @@ def _fragmentos(ctx: Contexto, refs: Referencias, k: int, limiar: int,
 
 
 def especialista_arranhao(ctx: Contexto, refs: Referencias, k: int = ARRANHAO_K,
-                          limiar: int = ARRANHAO_LIMIAR,
-                          usar_envelope: bool = True) -> tuple[float, np.ndarray]:
-    """Maior nº de pixels de fragmentos finos dentro de uma janela de 101x101 px."""
+                          limiar: int = ARRANHAO_LIMIAR, usar_envelope: bool = True,
+                          morfologia: bool = True) -> tuple[float, np.ndarray]:
+    """Maior nº de pixels de fragmentos finos dentro de uma janela de 101x101 px.
+
+    morfologia=False conta todos os fragmentos (sem remover os menores que ARRANHAO_AREA_MIN)
+    e devolve a máscara sem o fechamento (só para medir o efeito da morfologia)."""
     _, rotulos, stats = _fragmentos(ctx, refs, k, limiar, usar_envelope)
-    manter = stats[:, cv2.CC_STAT_AREA] >= ARRANHAO_AREA_MIN
+    manter = stats[:, cv2.CC_STAT_AREA] >= (ARRANHAO_AREA_MIN if morfologia else 1)
     manter[0] = False
     frag = manter[rotulos]
     densidade = cv2.boxFilter(frag.astype(np.float32), -1, (ARRANHAO_JANELA, ARRANHAO_JANELA),
                               normalize=False)
     # máscara: os fragmentos, unidos por um fechamento (o feixe de riscos vira uma região)
-    mascara = cv2.morphologyEx(np.where(frag, 255, 0).astype(np.uint8), cv2.MORPH_CLOSE, _ee(15))
+    mascara = np.where(frag, 255, 0).astype(np.uint8)
+    if morfologia:
+        mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, _ee(15))
     return float(densidade.max()), mascara
 
 
@@ -519,9 +821,12 @@ ESPECIALISTAS = {
 }
 
 
-def examinar(bgr: np.ndarray, refs: Referencias) -> tuple[dict[str, float], dict[str, np.ndarray]]:
-    """Passa a imagem pelos 5 especialistas. Devolve {estágio: valor} e {estágio: máscara}."""
-    ctx = preparar(bgr)
+def examinar(bgr: np.ndarray, refs: Referencias,
+             ctx: Contexto | None = None) -> tuple[dict[str, float], dict[str, np.ndarray]]:
+    """Passa a imagem pelos 5 especialistas. Devolve {estágio: valor} e {estágio: máscara}.
+    `ctx` evita refazer preparar(bgr) quando quem chama já tem o contexto."""
+    if ctx is None:
+        ctx = preparar(bgr)
     valores, mascaras = {}, {}
     for nome in ESTAGIOS:
         valores[nome], mascaras[nome] = ESPECIALISTAS[nome](ctx, refs)
@@ -549,10 +854,8 @@ def figura_passo_a_passo(bgr: np.ndarray, gt: np.ndarray, refs: Referencias, tit
     rec = lambda im: im[y0:y1, x0:x1]
 
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    k = FURINHO_K
-    realce = np.zeros((*ctx.cinza.shape, 3), np.uint8)
-    realce[..., 1] = np.clip(acima_do_envelope(ctx, refs, "claro", k).astype(int) * 12, 0, 255)
-    realce[..., 0] = np.clip(acima_do_envelope(ctx, refs, "escuro", k).astype(int) * 12, 0, 255)
+    mapa_log, blobs = blobs_furinho(ctx, refs)
+    realce = np.clip(mapa_log * 6, 0, 255).astype(np.uint8)
     fino = np.clip(acima_do_envelope(ctx, refs, "claro", ARRANHAO_K).astype(int) * 25, 0, 255)
     zonas = (rgb * 0.45).astype(np.uint8)
     zonas[ctx.valida] = rgb[ctx.valida]
@@ -560,7 +863,7 @@ def figura_passo_a_passo(bgr: np.ndarray, gt: np.ndarray, refs: Referencias, tit
         "squeeze": (ctx.capsula, "silhueta (Otsu)", "gray"),
         "faulty_imprint": (ctx.impressao, '"500" (histograma do realce)', "gray"),
         "crack": (ctx.preto, "tampa preta (Otsu no a*)", "gray"),
-        "poke": (realce, f"top-hat/black-hat {k} px acima do envelope", None),
+        "poke": (realce, "LoG acima do envelope (círculo = blob do valor)", "magma"),
         "scratch": (fino, f"top-hat {ARRANHAO_K} px acima do envelope", "gray"),
     }
 
@@ -575,27 +878,40 @@ def figura_passo_a_passo(bgr: np.ndarray, gt: np.ndarray, refs: Referencias, tit
     eixos[1, 0].set_title('zona válida dos especialistas 4 e 5\n(sem contorno, "500", logo e divisa)',
                           fontsize=10)
 
-    acusou = []
+    acusou, primeira = [], None
     for col, nome in enumerate(ESTAGIOS, start=1):
         valor, mascara = ESPECIALISTAS[nome](ctx, refs)
         img, legenda, cmap = entradas[nome]
         eixos[0, col].imshow(rec(img), cmap=cmap)
         eixos[0, col].set_title(f"{col}. {NOMES[nome]}\n{legenda}", fontsize=10)
+        if nome == "poke" and valor > 0:
+            b = max(blobs, key=lambda b: b["valor"])
+            eixos[0, col].add_patch(plt.Circle((b["x"] - x0, b["y"] - y0), b["raio"], fill=False,
+                                               color="cyan", linewidth=1))
         sobre = (rgb * 0.55).astype(np.uint8)
         sobre[mascara > 0] = (255, 60, 60)
         eixos[1, col].imshow(rec(sobre))
-        texto = f"valor = {valor:.3f}" if valor < 1 else f"valor = {valor:.0f}"
+        texto = f"valor = {valor:.3f}" if valor < 1 else (
+            f"valor = {valor:.1f}" if valor < 100 else f"valor = {valor:.0f}")
         if limiares is not None:
             disparou = valor > limiares[nome]
             texto += f"  (limiar {limiares[nome]:.3g})\n" + ("DEFEITO" if disparou else "passou")
             if disparou:
                 acusou.append(NOMES[nome])
+                primeira = primeira or nome
         eixos[1, col].set_title(texto, fontsize=10,
                                 color="crimson" if "DEFEITO" in texto else "black")
         if gt.any():
             eixos[1, col].contour(rec(gt) > 0, levels=[0.5], colors="lime", linewidths=1)
-    if limiares is not None:
-        titulo += "   ->   " + ("DEFEITUOSA (" + ", ".join(acusou) + ")" if acusou else "BOA")
+    if limiares is not None and acusou:
+        # tipo = primeira etapa que acusa; etapa 2 com diferença clara no "500" = furinho
+        if (primeira == "faulty_imprint" and diferenca_do_500(ctx, refs)[CHAVE_FRACAO_CLARA]
+                > limiares.get(CHAVE_FRACAO_CLARA, 1.0)):
+            primeira = "poke"
+        titulo += (f"   ->   DEFEITUOSA, tipo {NOMES[primeira]}   (acusaram: "
+                   + ", ".join(acusou) + ")")
+    elif limiares is not None:
+        titulo += "   ->   BOA"
     fig.suptitle(titulo, fontsize=13)
     fig.tight_layout()
     if salvar:

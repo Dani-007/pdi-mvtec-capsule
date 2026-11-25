@@ -17,19 +17,36 @@ IMPRESSÃO FALHA (faulty_imprint, 22 cápsulas)                      AUC   achad
 RACHADURA (crack, 23 cápsulas)                                     AUC   achadas
     método único: maior mancha do golden template (Etapas 3-4)   0.726      0.26
     forma da tampa preta, Otsu no cinza                          0.636      0.13
+    forma da tampa preta, k-means (2 grupos) em a*, b*           0.754      0.52
   * forma da tampa preta, Otsu no a* (Lab)                       0.773      0.52
-    contraste local 15 px (o especialista do furinho)            0.935      0.57
+    contraste local 15 px (método anterior do furinho)           0.935      0.57
+    blobs do LoG + circularidade (o especialista do furinho)     0.844      0.65
 
 FURINHO (poke, 21 cápsulas)                                        AUC   achadas
     método único: maior mancha do golden template (Etapas 3-4)   0.562      0.05
-    top-hat/black-hat 15 px, sem envelope                        0.751      0.00
-    top-hat/black-hat 25 px, acima do envelope                   0.906      0.57
-  * top-hat/black-hat 15 px, acima do envelope                   0.967      0.62
+    top-hat/black-hat 15 px, sem envelope                        0.752      0.00
+    top-hat/black-hat 25 px, acima do envelope                   0.904      0.52
+    top-hat/black-hat 15 px, acima do envelope (anterior)        0.961      0.62
+    anterior, só manchas com circularidade >= 0,4                0.922      0.33
+    LoG em 3 escalas, acima do envelope (maior pico)             0.880      0.48
+    LoG + crescimento de região + circularidade                  0.845      0.38
+  * LoG + Otsu no círculo + circularidade                        0.817      0.57
 
 ARRANHÃO (scratch, 23 cápsulas)                                    AUC   achadas
     método único: maior mancha do golden template (Etapas 3-4)   0.492      0.00
-    pixels de borda do Canny (Etapa 1)                           0.526      0.04
+    pixels de borda do Canny (Etapa 1)                           0.539      0.04
     maior risco (top-hat 9 px), sem envelope                     0.760      0.09
     maior risco (top-hat 9 px), acima do envelope                0.961      0.61
     concentração de fragmentos, sem envelope                     0.934      0.30
   * concentração de fragmentos, acima do envelope                0.983      0.87
+
+FURINHO: quantas cápsulas de cada tipo cada candidato acusa
+(acima do percentil 98 das boas de treino, 5 folds; o ideal é acusar só o furinho)
+                                                                    good 192    crack 23  faulty_ 22     poke 21  scratch 23  squeeze 20
+    top-hat/black-hat 15 px, sem envelope                                  4           0           0           0           1           1
+    top-hat/black-hat 25 px, acima do envelope                             4          14           0          11           5           6
+    top-hat/black-hat 15 px, acima do envelope (anterior)                  4          13          10          13          12           6
+    anterior, só manchas com circularidade >= 0,4                          2          10           3           7           3           3
+    LoG em 3 escalas, acima do envelope (maior pico)                       5          15           3          10           2           4
+    LoG + crescimento de região + circularidade                            5          10           0           8           0           6
+  * LoG + Otsu no círculo + circularidade                                  5          15           1          12           1           7

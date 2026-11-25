@@ -1,0 +1,39 @@
+Etapa do furinho: método anterior x LoG + Otsu no círculo + circularidade
+anterior = top-hat/black-hat 15 px acima do envelope, área da maior mancha
+depois   = resposta do LoG (3 escalas, acima do envelope) x circularidade da região do Otsu no círculo, área >= 150 px
+tipo = primeira etapa que acusa (regra simples, sem o refinamento pela diferença do "500")
+
+AUC do valor da etapa para separar cada tipo das boas (0,50 = não reage ao tipo):
+                     crack  faulty_imprint            poke         scratch         squeeze
+anterior             0.935           0.939           0.961           0.914           0.873
+depois               0.844           0.603           0.817           0.730           0.943
+
+ALFA = 0.02
+            espec.  recall  ac.bal.    AUC   tipo   acerto do tipo: crack / faulty_ / poke / scratch / squeeze
+anterior     0.964   0.899    0.931  0.975   0.63   0.43 / 0.95 / 0.33 / 0.43 / 1.00
+depois       0.953   0.908    0.931  0.969   0.67   0.43 / 0.95 / 0.29 / 0.70 / 1.00
+
+  quantas cápsulas de cada tipo a etapa do furinho acusa:
+                      good           crack  faulty_imprint            poke         scratch         squeeze
+anterior                 3              12               9              12               8               4
+depois                   3              15               1              11               1               7
+
+  quantas só a etapa do furinho acusa (perdidas se ela for retirada):
+                      good           crack  faulty_imprint            poke         scratch         squeeze
+anterior                 1               0               0               0               0               0
+depois                   3               1               0               0               0               0
+
+ALFA = 0.05
+            espec.  recall  ac.bal.    AUC   tipo   acerto do tipo: crack / faulty_ / poke / scratch / squeeze
+anterior     0.901   0.945    0.923  0.978   0.59   0.43 / 0.95 / 0.33 / 0.22 / 1.00
+depois       0.870   0.945    0.907  0.974   0.68   0.43 / 0.95 / 0.33 / 0.70 / 1.00
+
+  quantas cápsulas de cada tipo a etapa do furinho acusa:
+                      good           crack  faulty_imprint            poke         scratch         squeeze
+anterior                 8              18              13              15              14               8
+depois                  10              15               2              12               1               9
+
+  quantas só a etapa do furinho acusa (perdidas se ela for retirada):
+                      good           crack  faulty_imprint            poke         scratch         squeeze
+anterior                 2               2               0               0               0               0
+depois                   8               1               0               1               0               0

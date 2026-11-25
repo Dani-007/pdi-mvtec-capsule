@@ -10,3 +10,4 @@ __pycache__/
 
 # Arquivos gerados pelos scripts (cache e máscaras; recriados ao rodar)
 dados/gerado/
+CLAUDE.md

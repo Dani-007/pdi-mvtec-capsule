@@ -3,14 +3,16 @@
     "squeeze": 600.89,
     "faulty_imprint": 0.0325801,
     "crack": 115.5,
-    "poke": 185.39,
-    "scratch": 190.75
+    "poke": 5.6921426,
+    "scratch": 190.75,
+    "dif500_frac_clara": 0.169645
   },
   "alfa_0.05": {
     "squeeze": 588.5,
     "faulty_imprint": 0.031745749999999996,
     "crack": 28.5,
-    "poke": 120.12499999999997,
-    "scratch": 113.67499999999998
+    "poke": 5.328257,
+    "scratch": 113.67499999999998,
+    "dif500_frac_clara": 0.169645
   }
 }

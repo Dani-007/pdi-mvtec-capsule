@@ -1,0 +1,18 @@
+Etapa 7 - qual defeito (109 defeituosas, 5 classes, 5 folds); acaso = 0,20
+nas regras da cascata, defeituosa que nenhuma etapa acusa conta como erro; os classificadores dão um tipo a todas as 109 (ver sistema_final.txt para a comparação nas mesmas condições)
+
+atributos            decisao                               acuracia_balanceada  f1_macro  acerto_crack  acerto_faulty_imprint  acerto_poke  acerto_scratch  acerto_squeeze
+valores              cascata: 1ª etapa que acusa           0.674                0.678     0.435         0.955                  0.286        0.696           1.000         
+valores + diferenca  cascata: 1ª etapa + diferença do 500  0.713                0.729     0.435         0.909                  0.524        0.696           1.000         
+valores              SVM                                   0.643                0.618     0.478         0.773                  0.095        0.870           1.000         
+valores              RandomForest                          0.654                0.632     0.435         0.727                  0.238        0.870           1.000         
+geometria            SVM                                   0.326                0.327     0.304         0.227                  0.381        0.217           0.500         
+geometria            RandomForest                          0.428                0.421     0.348         0.409                  0.571        0.261           0.550         
+textura              SVM                                   0.539                0.535     0.435         0.591                  0.524        0.348           0.800         
+textura              RandomForest                          0.512                0.502     0.217         0.591                  0.571        0.478           0.700         
+posicao              SVM                                   0.485                0.462     0.522         0.727                  0.143        0.435           0.600         
+posicao              RandomForest                          0.550                0.542     0.522         0.818                  0.333        0.478           0.600         
+diferenca            SVM                                   0.348                0.268     0.000         0.591                  0.000        1.000           0.150         
+diferenca            RandomForest                          0.378                0.317     0.000         0.545                  0.095        1.000           0.250         
+completo             SVM                                   0.584                0.585     0.348         0.636                  0.571        0.565           0.800         
+completo             RandomForest                          0.737                0.732     0.565         0.864                  0.524        0.783           0.950         

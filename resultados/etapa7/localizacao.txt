@@ -2,11 +2,11 @@ Localização: união das máscaras das etapas que acusaram x ground truth (ALFA
 hit = fração das defeituosas com >= 30 px marcados dentro do defeito real
 
 tipo               n    hit  precisão  recall   dice    iou
-crack             23   0.83      0.65    0.30  0.374  0.269
-faulty_imprint    22   0.95      0.81    0.22  0.326  0.208
-poke              21   0.71      0.82    0.24  0.309  0.218
-scratch           23   0.83      0.86    0.13  0.203  0.124
-squeeze           20   1.00      0.45    0.22  0.261  0.156
-todas            109   0.86      0.53    0.22  0.295  0.195
+crack             23   0.87      0.65    0.31  0.385  0.275
+faulty_imprint    22   0.95      0.80    0.21  0.313  0.198
+poke              21   0.71      0.82    0.23  0.300  0.210
+scratch           23   0.83      0.87    0.12  0.195  0.117
+squeeze           20   1.00      0.45    0.23  0.268  0.161
+todas            109   0.87      0.53    0.22  0.292  0.193
 
-Boas: 20 px falsos por imagem em média; 4% das boas com algum pixel marcado
+Boas: 19 px falsos por imagem em média; 5% das boas com algum pixel marcado

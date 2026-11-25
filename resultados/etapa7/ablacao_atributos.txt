@@ -1,0 +1,16 @@
+Etapa 7 - o que cada atributo do pipeline sugerido acrescenta (acurácia balanceada)
+cor = a*, b* do Lab; orientacao = ângulo do eixo maior; GLCM = 4 descritores de Haralick; HOG = 8 orientações do gradiente; diferenca = do "500" para o modelo
+(uma semente do Random Forest varia +-0,01; com ~20 cápsulas por tipo, diferenças menores que ~0,05 não são conclusivas)
+região = pixels da região suspeita; global = cápsula inteira (extensão opcional)
+
+atributos                        n  binária SVM  binária RF  tipo SVM  tipo RF
+completo                        50        0.920       0.923     0.584    0.737
+completo sem cor                46        0.919       0.923     0.550    0.711
+completo sem orientacao         49        0.913       0.923     0.575    0.728
+completo sem GLCM               46        0.928       0.929     0.576    0.772
+completo sem HOG                42        0.906       0.927     0.579    0.701
+completo sem os 4               33        0.914       0.935     0.518    0.675
+completo sem diferenca          46        0.920       0.916     0.585    0.719
+valores + textura da regiao     30        0.908       0.911     0.584    0.730
+valores + textura global        29        0.904       0.955     0.686    0.757
+textura global                  24        0.821       0.789     0.494    0.467

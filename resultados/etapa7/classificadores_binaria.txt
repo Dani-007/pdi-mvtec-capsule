@@ -1,0 +1,18 @@
+Etapa 7 - normal x defeituosa (301 imagens, 5 folds): regra da cascata x classificadores
+cascata = um limiar por etapa (ALFA = 0.02); classificadores na decisão padrão
+atributos: valores = os 5 valores dos especialistas; geometria, textura e posicao = da região suspeita (união das máscaras); diferenca = do "500" para o modelo casado
+
+atributos  decisao             acuracia_balanceada  precisao  recall  especificidade  f1_defeituosa  roc_auc
+valores    cascata (limiares)  0.931                0.917     0.908   0.953           0.912          0.969  
+valores    SVM                 0.925                0.941     0.881   0.969           0.910          0.979  
+valores    RandomForest        0.940                0.918     0.927   0.953           0.922          0.982  
+geometria  SVM                 0.868                0.827     0.835   0.901           0.831          0.935  
+geometria  RandomForest        0.875                0.823     0.853   0.896           0.838          0.949  
+textura    SVM                 0.881                0.867     0.835   0.927           0.850          0.952  
+textura    RandomForest        0.871                0.835     0.835   0.906           0.835          0.938  
+posicao    SVM                 0.727                0.660     0.642   0.812           0.651          0.782  
+posicao    RandomForest        0.735                0.670     0.651   0.818           0.660          0.808  
+diferenca  SVM                 0.629                0.861     0.284   0.974           0.428          0.620  
+diferenca  RandomForest        0.632                0.886     0.284   0.979           0.431          0.616  
+completo   SVM                 0.920                0.884     0.908   0.932           0.896          0.978  
+completo   RandomForest        0.923                0.892     0.908   0.938           0.900          0.981  
