@@ -4,6 +4,9 @@ Disciplina de Processamento Digital de Imagens — UFSCar · Prof. Dr. Ricardo J
 
 > **Questão de projeto:** é possível detectar e classificar defeitos usando apenas processamento
 > clássico e atributos interpretáveis?
+>
+> O relatório final está em [`docs/relatorio.md`](docs/relatorio.md). Este README é o documento
+> técnico completo, com todas as tabelas de cada etapa.
 
 ## Sumário
 
@@ -76,7 +79,7 @@ etapas e só é aprovada se nenhuma acusar. É a abordagem com melhor resultado 
 | **3** | Máscara final: golden template com "500" e logo realinhados + morfologia completa (`src/segmentacao.py`) | ✅ concluída |
 | **4** | Atributos: ficha da mancha mais suspeita, com "500" e logo segmentados pelo histograma (`src/impressao.py`, `src/atributos.py`) | ✅ concluída |
 | **5** | Classificação: SVM × Random Forest, por grupo de atributos (`src/classificacao.py`) | ✅ concluída |
-| **6** | Relatório final (`docs/relatorio.md`) | ✅ atualizado com a Etapa 7 |
+| **6** | Relatório final (`docs/relatorio.md`) | ✅ versão final enxuta, organizada pela evolução da arquitetura (v1 → v5) |
 | **7** | **Versão final.** Cascata de especialistas, um método por defeito (`src/especialistas.py`, `src/cascata.py`, `src/comparar_candidatos.py`, `src/classificacao_cascata.py`) | ✅ concluída; furinho refeito com LoG + Otsu no círculo + circularidade; todos os experimentos mínimos do enunciado refeitos nela |
 
 ## 4. Pipeline (Etapas 1–5 e 7)
@@ -812,7 +815,8 @@ balanceada):
 4. ~~Atributos da região segmentada~~ (Etapa 4, feita; textura por estatísticas do histograma e
    LBP; a GLCM e o HOG entraram depois, na ficha da Etapa 7).
 5. ~~Classificação com SVM e Random Forest, por grupo de atributos~~ (Etapa 5, feita).
-6. ~~Relatório final~~ (`docs/relatorio.md`, versão inicial).
+6. ~~Relatório final~~ (`docs/relatorio.md`, versão final: evolução da arquitetura, resultados,
+   discussão e limitações).
 7. ~~Tratar cada defeito com um método específico, como foi feito com o "500"~~ (Etapa 7, feita:
    cascata de 5 especialistas).
 8. ~~Tirar a redundância do especialista do furinho~~ (feito: LoG + Otsu no círculo +
@@ -868,7 +872,7 @@ pdi-mvtec-capsule/
 ├── requirements.txt
 ├── docs/
 │   ├── projetos_pdi_quatro_propostas.pdf   enunciado
-│   └── relatorio.md        relatório final (Etapa 6)
+│   └── relatorio.md        relatório final (evolução da arquitetura e resultados)
 ├── src/
 │   ├── pipeline.py         Etapa 1: funções do pipeline e passo a passo de uma imagem
 │   ├── avaliar.py          Etapa 1: avaliação nas 132 imagens de test/
