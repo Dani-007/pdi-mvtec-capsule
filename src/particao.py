@@ -1,23 +1,10 @@
-"""
-Etapa 2 - Partição própria do dataset (capsule, MVTec AD).
+"""Etapa 2: partição própria do dataset.
 
-O enunciado pede uma partição supervisionada própria, e nenhum parâmetro deve ser
-escolhido olhando as imagens usadas na avaliação final. A partição é:
+    banco          30 boas de train/good  -> referências
+    calibracao     20 boas de train/good  -> limiares (só a variação normal)
+    classificacao  192 boas + 109 defeituosas -> avaliação, 5 folds estratificados por tipo
 
-    banco         30 normais de train/good  -> referências do golden template
-    calibracao    20 normais de train/good  -> limiares e parâmetros (só imagens boas)
-    classificacao 169 normais de train/good + 23 normais de test/good
-                  + 109 defeituosas de test/ -> atributos e classificação, com
-                  validação cruzada estratificada em 5 folds
-
-O banco e a calibração são exatamente os mesmos da Etapa 1 (pipeline.py usa as 30
-primeiras imagens de train/good, em ordem alfabética, como banco e as 20 seguintes
-para calibrar o limiar), então a Etapa 1 continua válida.
-
-Os folds são sorteados com semente fixa e estratificados por tipo (good, crack,
-faulty_imprint, poke, scratch, squeeze): cada fold tem ~1/5 de cada tipo.
-
-Uso:  python src/particao.py   -> gera dados/particao.csv e imprime o resumo
+Uso:  python src/particao.py   -> dados/particao.csv
 """
 
 from __future__ import annotations

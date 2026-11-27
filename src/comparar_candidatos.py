@@ -1,28 +1,7 @@
-"""
-Etapa 7 - Qual método é o ideal para cada defeito? Comparação dos candidatos.
+"""Etapa 7: compara os métodos candidatos de cada defeito (AUC e achadas) e o efeito da
+morfologia em cada especialista.
 
-Para cada defeito foram testados alguns métodos. Cada um dá um valor por imagem, e a comparação
-usa duas medidas, sempre do defeito-alvo contra as cápsulas boas de 'classificacao':
-
-    AUC     chance de uma cápsula com o defeito ter valor maior que uma boa (0,50 = acaso);
-    achadas fração das cápsulas com o defeito que o método acha quando o limiar é o percentil
-            98 das boas de treino (validação cruzada com os folds da partição), ou seja,
-            aceitando ~2% de alarme falso.
-
-O escolhido de cada defeito (marcado com *) é o que está em especialistas.py. No furinho, o
-critério não é só achar o alvo: a etapa anterior (contraste local) acusava também os outros
-defeitos, então a tabela mostra ainda quantas cápsulas de cada tipo cada candidato acusa. A primeira
-linha de cada bloco é o método único das Etapas 3-4 (área da maior mancha suspeita do golden
-template), lido de dados/atributos.csv, para referência.
-
-Efeito da morfologia (experimento mínimo do enunciado, na versão final). Cada especialista é
-rodado sem e com as suas operações morfológicas; a máscara que ele devolve (sem limiar de
-decisão) é comparada com o ground truth do defeito-alvo, e nas cápsulas boas todo pixel marcado
-é falso positivo.
-
-Saída: resultados/etapa7/tabela_candidatos.txt|csv
-       resultados/etapa7/tabela_morfologia.txt|csv
-Uso:   python src/comparar_candidatos.py      (~3 min)
+Uso:  python src/comparar_candidatos.py   (~4 min) -> tabela_candidatos.txt, tabela_morfologia.txt
 """
 
 from __future__ import annotations

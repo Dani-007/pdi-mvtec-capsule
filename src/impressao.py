@@ -1,36 +1,8 @@
-"""
-Segmentação da impressão "500" pelo histograma dentro da cápsula (sugestão do professor).
+"""Segmentação do "500" e do logo pelo histograma do realce local, e realinhamento local.
 
-Dentro da máscara da cápsula (sem o fundo), o histograma de intensidade tem modos separados:
-    < 45     metade preta
-    45-75    logo "actavis" (sobre a metade preta)
-    75-112   metade laranja
-    > 112    impressão "500" (a região mais clara da cápsula)
-
-Um limiar fixo ou um Otsu direto nessa faixa clara falha em parte das imagens: a iluminação
-deixa a metade laranja com DOIS tons (topo e base) e o Otsu corta no meio do laranja.
-Por isso o histograma é calculado sobre o realce local, e não sobre o cinza:
-
-    1. fundo local = filtro da mediana 45x45 (maior que a espessura dos algarismos, ~25 px);
-    2. realce = cinza - fundo local  (quanto o pixel é mais claro que a vizinhança);
-    3. região = máscara da cápsula erodida 21 px (tira o contorno, que também é claro)
-                e só a metade clara (fundo local > 60), onde fica o "500";
-    4. limiar de Otsu no histograma do realce dentro dessa região;
-    5. abertura 5x5 e componentes conexos: ficam só os "algarismos" (área >= 300 px,
-       altura >= 40 px e largura/altura < 3), o que descarta reflexos compridos.
-
-O logo "actavis" (na metade preta) é segmentado do mesmo jeito, no histograma do realce
-dentro da metade escura (segmentar_logo). Quando a cápsula está girada e o logo não aparece, o
-limiar de Otsu cai para quase zero; por isso há um contraste mínimo (REALCE_MIN_LOGO).
-
-Uso das máscaras:
-  1. Na localização (segmentacao.py): a cápsula gira em torno do próprio eixo, então o "500"
-     e o logo aparecem alguns pixels deslocados em relação à referência, mesmo depois do
-     alinhamento global. Na região deles, a referência é realinhada localmente por template
-     matching (realinhar_local) antes da subtração. A variação normal da impressão some e uma
-     falha de impressão continua aparecendo (a forma é diferente, não só a posição).
-  2. Nos atributos (atributos.py): o "500" NÃO é apagado da mancha, porque os defeitos também
-     caem sobre ele (impressão falha ~89% da área, furinho e arranhão ~45%); ele vira atributos.
+realce = cinza - mediana 45x45; Otsu no realce (metade clara para o "500", metade escura para
+o logo); componentes com forma de algarismo. Na diferença do golden template, a referência é
+realinhada por template matching na região do "500"/logo antes da subtração.
 
 Uso (figura de diagnóstico):  python src/impressao.py
 """
@@ -79,8 +51,8 @@ def segmentar_impressao(cinza: np.ndarray, mascara_capsula: np.ndarray) -> tuple
 
 
 def segmentar_logo(cinza: np.ndarray, mascara_capsula: np.ndarray) -> np.ndarray:
-    """Máscara do logo "actavis": histograma do realce local na metade preta, Otsu, abertura
-    3x3 e componentes do tamanho de letras. Vazia se o logo não estiver visível."""
+    """Máscara do logo "actavis": histograma do realce local na metade preta, Otsu, abertura 3x3
+    e componentes do tamanho de letras. Vazia se o logo não estiver visível."""
     roi = cv2.erode(mascara_capsula, _ee(EROSAO_ROI))
     fundo = cv2.medianBlur(cinza, JANELA_FUNDO)
     realce = cv2.subtract(cinza, fundo)
@@ -104,8 +76,8 @@ def segmentar_logo(cinza: np.ndarray, mascara_capsula: np.ndarray) -> np.ndarray
 
 def realinhar_local(dif: np.ndarray, teste: np.ndarray, ref: np.ndarray,
                     zona: np.ndarray) -> np.ndarray:
-    """Recalcula |teste - ref| dentro da zona (impressão ou logo), depois de achar, por
-    template matching, o pequeno deslocamento que melhor encaixa a referência no teste."""
+    """Recalcula |teste - ref| dentro da zona (impressão ou logo), depois de achar, por template
+    matching, o pequeno deslocamento que melhor encaixa a referência no teste."""
     if not zona.any():
         return dif
     ys, xs = np.where(zona > 0)
@@ -138,12 +110,7 @@ def diferenca_com_impressao(teste: np.ndarray, ref: np.ndarray, mascara: np.ndar
 
 
 def descrever_impressao(mascara_500: np.ndarray) -> dict[str, float]:
-    """Atributos de forma e topologia da impressão.
-
-    Um "500" normal tem ~3-4 componentes (o traço de cima do "5" às vezes se separa) e 2
-    buracos (os dois zeros). Uma falha de impressão muda a área, quebra algarismos
-    (mais componentes) ou abre os zeros (menos buracos).
-    """
+    """Atributos de forma e topologia da impressão."""
     n, _, stats, _ = cv2.connectedComponentsWithStats(mascara_500, connectivity=8)
     componentes = n - 1
     contornos, hier = cv2.findContours(mascara_500, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)

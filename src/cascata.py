@@ -1,46 +1,9 @@
-"""
-Etapa 7 - Cascata de especialistas: cada cápsula passa por 5 etapas, uma por defeito
-(especialistas.py). Se alguma etapa acusar, a cápsula é defeituosa; se passar por todas,
-é boa.
+"""Etapa 7: cascata dos 5 especialistas. Se alguma etapa acusar, a cápsula é defeituosa.
 
-    imagem -> 1. amassado -> 2. impressão falha -> 3. rachadura -> 4. furinho -> 5. arranhão -> BOA
-                   |               |                   |              |              |
-                   +---------------+------- acusou: DEFEITUOSA -------+--------------+
+Limiar de cada etapa (só no treino): a = percentil (1 - ALFA) das boas; limiar = ponto médio
+entre a e o menor defeito-alvo acima dele. Validação cruzada com os 5 folds da partição.
 
-Cada especialista devolve um valor; a etapa acusa quando valor > limiar da etapa.
-
-Limiar de cada etapa (definido SÓ com imagens de treino):
-    a = percentil (1 - ALFA) do valor nas cápsulas BOAS de treino, ou seja, a etapa aceita
-        dar alarme falso em no máximo ALFA das boas;
-    limiar = ponto médio entre `a` e o menor valor, acima de `a`, entre os defeitos-alvo de
-        treino. Quando sobra folga entre boas e defeitos (amassado, impressão), o limiar vai
-        para o meio da folga e a etapa praticamente não dá alarme falso.
-
-Protocolo (o mesmo das Etapas 2-5, "quem ajusta não dá nota"):
-    - referências dos especialistas: as 30 boas do conjunto 'banco';
-    - limiares: validação cruzada com a coluna 'fold' (5 rodadas). Em cada rodada, o treino são
-      as 20 boas de 'calibracao' + os 4 folds de treino; a decisão é tomada no 5º fold;
-    - cada imagem de 'classificacao' é decidida uma vez, por limiares que não a viram.
-
-Saídas:
-    dados/especialistas.csv                     valor de cada especialista por imagem (e, na
-                                                coluna poke_anterior, o do método anterior do
-                                                furinho, que não entra na cascata)
-    dados/limiares_cascata.json                 limiares finais (todas as imagens), para uso
-    dados/gerado/especialistas/*.png            máscaras de cada especialista (não versionado)
-    resultados/etapa7/tabela_especialistas.txt  AUC de cada especialista x tipo de defeito
-    resultados/etapa7/tabela_cascata.txt|csv    cascata em vários pontos de operação (ALFA)
-    resultados/etapa7/disparos_por_tipo.txt     que etapa acusa cada tipo; tipo apontado
-    resultados/etapa7/ablacao.txt               cascata sem cada etapa
-    resultados/etapa7/furinho_antes_depois.txt  furinho: top-hat (anterior) x LoG + circularidade
-    resultados/etapa7/furinho_log_otsu.png      passo a passo do especialista do furinho
-    resultados/etapa7/localizacao.txt           máscara da cascata x ground truth
-    resultados/etapa7/erros.csv                 falsos positivos e falsos negativos
-    resultados/etapa7/*.png                     figuras
-
-Uso:
-    python src/cascata.py                 (~1 min na 1ª vez; depois usa dados/especialistas.csv)
-    python src/cascata.py --recalcular    refaz os valores dos especialistas
+Uso:  python src/cascata.py [--recalcular]   (~2 min) -> resultados/etapa7/
 """
 
 from __future__ import annotations
@@ -77,9 +40,7 @@ AZUL, LARANJA = "#2a78d6", "#eb6834"
 TINTA, TINTA_2, FUNDO, GRADE = "#0b0b0b", "#52514e", "#fcfcfb", "#e4e3df"
 
 
-# =============================================================================
-# 1. VALORES DOS ESPECIALISTAS (em paralelo)
-# =============================================================================
+# --- 1. VALORES DOS ESPECIALISTAS (em paralelo) ---
 _REFS = None   # referências do banco; os processos filhos herdam (fork)
 
 
@@ -150,9 +111,7 @@ def carregar_valores() -> dict[str, np.ndarray]:
     return d
 
 
-# =============================================================================
-# 2. LIMIARES E DECISÃO
-# =============================================================================
+# --- 2. LIMIARES E DECISÃO ---
 def auc(pos: np.ndarray, neg: np.ndarray) -> float:
     """ROC-AUC: chance de um positivo ter valor maior que um negativo (empate vale 1/2)."""
     if len(pos) == 0 or len(neg) == 0:
@@ -170,13 +129,7 @@ def limiar_etapa(boas: np.ndarray, alvo: np.ndarray, alfa: float) -> float:
 
 
 def limiar_fracao_clara(d: dict, treino: np.ndarray, limiar_impressao: float) -> float:
-    """Quando a etapa 2 acusa: é impressão falha ou um furinho em cima do "500"?
-
-    Na impressão falha FALTA tinta: a cápsula fica mais escura que o modelo e a fração clara da
-    diferença é ~0. Um furo sobre a impressão expõe material mais claro. O corte é o que melhor
-    separa, no TREINO, as impressões falhas dos furinhos que a etapa 2 acusa (ponto médio entre
-    dois valores vizinhos; soma do acerto das duas classes). Sem exemplos das duas classes, o
-    corte é 1 (a fração nunca passa de 1, então nada é renomeado)."""
+    """Quando a etapa 2 acusa: é impressão falha ou um furinho em cima do "500"?"""
     if COLUNA_CLARA not in d:
         return 1.0
     acusou = treino & (d["faulty_imprint"] > limiar_impressao)
@@ -202,11 +155,7 @@ def limiares(d: dict, treino: np.ndarray, alfa: float, margem: bool = True) -> d
 
 
 def decidir(d: dict, alfa: float, estagios: list[str] = ESTAGIOS, margem: bool = True) -> dict:
-    """Validação cruzada: limiares no treino de cada rodada, decisão no fold de teste.
-
-    Devolve, para as imagens de 'classificacao': disparo[n, etapa] (bool), razao[n, etapa]
-    (valor / limiar), defeituosa[n] e furo_no_500[n] (a diferença do "500" é clara: se a etapa
-    2 for a primeira a acusar, o tipo apontado é furinho, e não impressão falha)."""
+    """Validação cruzada: limiares no treino de cada rodada, decisão no fold de teste."""
     n = len(d["tipo"])
     cls = d["conjunto"] == "classificacao"
     razao = np.zeros((n, len(estagios)))
@@ -240,17 +189,7 @@ def resumo(d: dict, r: dict) -> dict:
 
 
 def tipo_apontado(r: dict, refinar: bool = True) -> np.ndarray:
-    """Tipo apontado = primeira etapa da cascata que acusa; 'good' se nenhuma acusa.
-
-    refinar: quando a primeira etapa a acusar é a da impressão e a diferença do "500" para o
-    modelo é CLARA (r["furo_no_500"]), o tipo é furinho: a impressão falha perde tinta e fica
-    mais escura; quem clareia a impressão é um furo em cima dela. refinar=False é a regra
-    simples (só a ordem das etapas).
-
-    A ordem da cascata vai do especialista mais específico para o mais geral: amassado e
-    impressão quase só acusam o próprio defeito; o furinho acusa qualquer mancha compacta
-    (também as lascas da rachadura) e o arranhão mede contraste local fino e reage a quase
-    todos os defeitos, por isso ficam no fim."""
+    """Tipo apontado = primeira etapa da cascata que acusa; 'good' se nenhuma acusa."""
     ap = np.full(len(r["defeituosa"]), "good", dtype=object)
     for j in reversed(range(len(r["estagios"]))):
         ap[r["disparo"][:, j]] = r["estagios"][j]
@@ -269,9 +208,7 @@ def f1_macro_tipos(verdadeiro: np.ndarray, apontado: np.ndarray) -> float:
     return float(np.mean(f1))
 
 
-# =============================================================================
-# 3. LOCALIZAÇÃO: máscara da cascata x ground truth
-# =============================================================================
+# --- 3. LOCALIZAÇÃO: máscara da cascata x ground truth ---
 def mascara_cascata(arquivo: str, disparo: np.ndarray) -> np.ndarray:
     """União das máscaras das etapas que acusaram."""
     m = None
@@ -310,9 +247,7 @@ def avaliar_localizacao(d: dict, r: dict) -> str:
     return "\n".join(txt)
 
 
-# =============================================================================
-# 4. TABELAS
-# =============================================================================
+# --- 4. TABELAS ---
 def tabela_especialistas(d: dict) -> str:
     cls = d["conjunto"] == "classificacao"
     boas = cls & (d["tipo"] == "good")
@@ -465,9 +400,7 @@ def salvar_erros(d: dict, r: dict) -> tuple[list[int], list[int]]:
     return fp, fn
 
 
-# =============================================================================
-# 5. FIGURAS
-# =============================================================================
+# --- 5. FIGURAS ---
 def _eixos(ax):
     ax.set_facecolor(FUNDO)
     ax.spines[["top", "right"]].set_visible(False)
@@ -573,8 +506,8 @@ def figura_disparos(d: dict, r: dict) -> None:
 
 
 def figura_furinho(refs) -> None:
-    """Passo a passo do especialista do furinho em 5 cápsulas: o que o método anterior marcava,
-    o LoG acima do envelope, a região do Otsu no círculo e a circularidade."""
+    """Passo a passo do especialista do furinho em 5 cápsulas: o que o método anterior marcava, o
+    LoG acima do envelope, a região do Otsu no círculo e a circularidade."""
     import matplotlib.pyplot as plt
 
     # (arquivo, comentário, onde centrar o recorte): "log" = blob que dá o valor; "pico" = maior

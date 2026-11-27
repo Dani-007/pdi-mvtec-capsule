@@ -1,43 +1,9 @@
-"""
-Etapa 4 - Extração de atributos (a "ficha" de cada cápsula).
+"""Etapa 4: ficha de 30 atributos da mancha mais suspeita de cada cápsula.
 
-Entrada (por imagem do conjunto 'classificacao'):
-    - máscara final C4 da Etapa 3 (dados/gerado/mascaras/), ou seja, as manchas suspeitas;
-    - diferença do golden template (dados/gerado/cache_golden.npz);
-    - imagem em cinza (bilateral) e máscara da cápsula (pipeline.py);
-    - máscaras da impressão "500" e do logo, segmentadas pelo histograma (impressao.py).
+Mancha principal = a maior fora do "500" e do logo (manchas com >= 50% da área sobre eles são
+variação normal). Grupos: forma, textura (histograma e LBP) e posição/impressão.
 
-Mancha principal = a mancha MAIS SUSPEITA, e não simplesmente a maior. Cada mancha da máscara
-C4 é comparada com as zonas do "500" e do logo (dilatadas 15 px): manchas com metade ou mais
-da área sobre elas são variação normal da impressão/logo, que muda conforme a cápsula gira.
-A principal é a maior das OUTRAS manchas. Motivo (diagnóstico da Etapa 3): nas cápsulas boas,
-~76% dos pixels falsos que sobram ficam sobre o logo, e a maior mancha costumava ser a do logo,
-escondendo o defeito real numa mancha menor. As manchas sobre o "500" e o logo não são
-descartadas: viram atributos próprios (área sobre cada zona), e a impressão falha continua
-descrita pelos atributos da impressão.
-
-Saída: dados/atributos.csv, uma linha por imagem, com as colunas de identificação
-(arquivo, tipo, rotulo, fold) e os atributos abaixo, organizados em 3 grupos para a
-comparação pedida no enunciado (forma x textura x todos):
-
-    FORMA (geometria da mancha principal + quantidade/área de manchas)
-        n_manchas, n_suspeitas, area_suspeitas, area_maior, perimetro, compacidade,
-        excentricidade, extensao, solidez, hu1, hu2, hu3
-    TEXTURA (intensidade e textura dentro da mancha principal)
-        media_cinza, desvio_cinza, media_dif, max_dif,
-        suavidade, assimetria, uniformidade, entropia        (estatísticas do histograma)
-        lbp_entropia, lbp_uniformidade                         (LBP 8 vizinhos, raio 1)
-    POSIÇÃO E IMPRESSÃO (onde está a mancha principal, manchas sobre "500"/logo e o "500")
-        frac_metade_preta, dist_borda, area_sobre_500, area_sobre_logo,
-        imp_area_rel, imp_componentes, imp_buracos, imp_cv_area_algarismos
-
-Cápsula sem mancha suspeita: atributos de forma/textura da principal = 0 (n_suspeitas = 0 já
-informa o classificador). Os atributos da impressão existem sempre.
-
-A única referência usada para normalizar (área típica do "500") vem do conjunto
-'calibracao'. Nada aqui olha os rótulos: eles só são copiados para o CSV.
-
-Uso:  python src/atributos.py      (exige ter rodado src/segmentacao.py antes)
+Uso:  python src/atributos.py   (depois de src/segmentacao.py) -> dados/atributos.csv
 """
 
 from __future__ import annotations
@@ -91,8 +57,8 @@ def lbp(cinza: np.ndarray) -> np.ndarray:
 
 
 def estatisticas_histograma(valores: np.ndarray, niveis: int = 256) -> dict[str, float]:
-    """Descritores estatísticos de textura (momentos do histograma):
-    suavidade R = 1 - 1/(1 + s^2), assimetria (3º momento), uniformidade e entropia."""
+    """Descritores estatísticos de textura (momentos do histograma): suavidade R = 1 - 1/(1 +
+    s^2), assimetria (3º momento), uniformidade e entropia."""
     hist = np.bincount(valores.ravel(), minlength=niveis).astype(float)
     p = hist / hist.sum()
     z = np.arange(niveis) / (niveis - 1)              # níveis normalizados em [0, 1]

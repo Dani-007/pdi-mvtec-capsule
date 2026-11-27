@@ -1,59 +1,7 @@
-"""
-Etapa 7 - Atributos e classificadores sobre a saída dos especialistas.
+"""Etapa 7: atributos da região suspeita e SVM / Random Forest sobre a saída dos especialistas,
+comparados com a regra da cascata (normal x defeituosa, tipo e sistema completo).
 
-A cascata (cascata.py) decide com um limiar por etapa e aponta o tipo pela primeira etapa que
-acusa. Aqui a mesma saída dos especialistas é entregue a classificadores, para fazer na versão
-final do projeto as comparações pedidas no enunciado:
-
-    - grupos de atributos: geométricos, textura e a combinação completa;
-    - pelo menos dois classificadores: SVM (núcleo RBF) e Random Forest, e os dois contra a
-      regra da cascata (limiares);
-    - resultados por tipo de defeito; F1, acurácia balanceada e ROC-AUC.
-
-Ficha de cada cápsula (dados/atributos_cascata.csv). A "região suspeita" é a UNIÃO das máscaras
-que os 5 especialistas devolvem (sem limiar de decisão, então não usa rótulos):
-
-    VALORES     os 5 valores dos especialistas (o que a cascata usa)
-    GEOMETRIA   da região: nº de manchas, área total, largura e altura da caixa; da maior
-                mancha: área, perímetro, compacidade, excentricidade, extensão, solidez,
-                eixo maior e ORIENTAÇÃO (ângulo do eixo maior com o eixo da cápsula)
-    TEXTURA     dentro da região: intensidade (média, desvio, contraste com um anel em volta),
-                COR (média e desvio de a* e b* do Lab), estatísticas do histograma, LBP,
-                GLCM (contraste, homogeneidade, energia, correlação) e HOG (histograma de 8
-                orientações do gradiente)
-    POSICAO     fração da região na tampa preta e sobre o "500", distância ao contorno e
-                posição ao longo da cápsula
-    DIFERENCA   diferença do "500" para o modelo casado (o do especialista 2): área, fração
-                mais clara que o modelo, pixels claros fora dos traços e escuros sobre eles.
-                Na impressão falha falta tinta (mais escuro); um furo sobre o "500" expõe
-                material mais claro
-    GLOBAL      os mesmos descritores de textura na cápsula INTEIRA (extensão opcional do
-                enunciado: atributos da região defeituosa x atributos globais)
-
-Cor, orientação, GLCM e HOG estão no pipeline sugerido do enunciado e não tinham sido usados
-nas etapas anteriores; a tabela de ablação mede o que cada um acrescenta.
-
-Tarefas (mesmo protocolo da Etapa 5: 5 folds da partição, padronização e hiperparâmetros só no
-treino de cada rodada; as 20 boas de 'calibracao' entram sempre no treino, como na cascata):
-    binaria   normal x defeituosa, 301 imagens;
-    tipo      qual dos 5 defeitos, nas 109 defeituosas;
-    sistema   a cascata decide normal x defeituosa e o classificador dá o tipo das acusadas,
-              comparado com as duas regras da cascata: "primeira etapa que acusa" e a mesma
-              regra refinada pela diferença do "500" (cascata.tipo_apontado).
-
-Saídas em resultados/etapa7/:
-    classificadores_binaria.txt|csv   grupos x classificadores x regra da cascata
-    classificadores_tipo.txt|csv      idem, qual defeito; acerto por tipo
-    ablacao_atributos.txt             completo sem cor / orientação / GLCM / HOG / diferença;
-                                      região x global
-    sistema_final.txt                 cascata + classificador do tipo; matriz 6 x 6
-    roc_binaria.png                   curvas ROC: cascata, SVM e Random Forest
-    matriz_confusao_tipo.png          regra da cascata x classificador
-    importancia_atributos_cascata.png Random Forest, ficha completa
-
-Uso:  python src/classificacao_cascata.py               (~10 min; exige dados/especialistas.csv
-                                                         e as máscaras: rode src/cascata.py antes)
-      python src/classificacao_cascata.py --recalcular  refaz dados/atributos_cascata.csv
+Uso:  python src/classificacao_cascata.py [--recalcular]   (~10 min, depois de src/cascata.py)
 """
 
 from __future__ import annotations
@@ -106,13 +54,10 @@ COMPLETO = [a for g in GRUPOS.values() for a in g]
 ATRIBUTOS = COMPLETO + GLOBAL
 
 
-# =============================================================================
-# 1. DESCRITORES
-# =============================================================================
+# --- 1. DESCRITORES ---
 def glcm(cinza: np.ndarray, mascara: np.ndarray, niveis: int = GLCM_NIVEIS) -> dict[str, float]:
-    """Matriz de coocorrência de níveis de cinza: quantas vezes o nível i aparece ao lado do
-    nível j (vizinhos a 1 px, nas 4 direções), contando só pares com os dois pixels dentro
-    da máscara. Descritores de Haralick: contraste, homogeneidade, energia e correlação."""
+    """GLCM (vizinhos a 1 px, 4 direções, só dentro da máscara): contraste, homogeneidade,
+    energia e correlação."""
     q = (cinza.astype(np.int32) * niveis) // 256
     dentro = mascara > 0
     h, w = q.shape
@@ -138,10 +83,8 @@ def glcm(cinza: np.ndarray, mascara: np.ndarray, niveis: int = GLCM_NIVEIS) -> d
 
 
 def hog(cinza: np.ndarray, mascara: np.ndarray, faixas: int = HOG_FAIXAS) -> dict[str, float]:
-    """Histograma de orientações do gradiente (HOG de uma célula só): Sobel 3x3, orientação em
-    [0, 180) dividida em faixas, cada pixel da máscara vota com a magnitude. Normalizado para
-    somar 1. A cápsula está sempre na horizontal, então as faixas são comparáveis entre
-    imagens (um feixe de riscos concentra o histograma numa faixa; um furo espalha)."""
+    """HOG de uma célula só: histograma das orientações do gradiente (Sobel), ponderado pela
+    magnitude e normalizado."""
     gx = cv2.Sobel(cinza, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(cinza, cv2.CV_32F, 0, 1, ksize=3)
     dentro = mascara > 0
@@ -173,8 +116,8 @@ def descrever_textura(cinza: np.ndarray, lab: np.ndarray, codigos_lbp: np.ndarra
 
 
 def ficha(ctx, mascaras: list[np.ndarray], refs) -> dict[str, float]:
-    """Atributos da região suspeita (união das máscaras dos especialistas), da diferença do
-    "500" para o modelo e os globais."""
+    """Atributos da região suspeita (união das máscaras dos especialistas), da diferença do "500"
+    para o modelo e os globais."""
     f = {a: 0.0 for a in ATRIBUTOS if a not in ESTAGIOS}
     f.update(diferenca_do_500(ctx, refs))
     cinza = ctx.suave
@@ -265,9 +208,7 @@ def carregar_atributos() -> dict:
     return d
 
 
-# =============================================================================
-# 2. CLASSIFICADORES (mesmo protocolo da Etapa 5)
-# =============================================================================
+# --- 2. CLASSIFICADORES (mesmo protocolo da Etapa 5) ---
 def modelos() -> dict:
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import GridSearchCV, StratifiedKFold
@@ -288,9 +229,7 @@ def modelos() -> dict:
 
 
 def validar(X: np.ndarray, y: np.ndarray, fold: np.ndarray, modelo, positiva: str | None) -> dict:
-    """5 rodadas com os folds da partição; imagens com fold -1 (calibração) só treinam.
-    Devolve a classe prevista, a pontuação da classe positiva (tarefa binária) e a importância
-    média dos atributos (Random Forest)."""
+    """5 rodadas com os folds da partição; imagens de calibração (fold -1) só treinam."""
     pred = np.empty(len(y), dtype=object)
     pont = np.zeros(len(y))
     imp = []
@@ -347,9 +286,7 @@ def tabela(linhas: list[dict], nome: str, cabecalho: list[str]) -> str:
     return texto
 
 
-# =============================================================================
-# 3. FIGURAS
-# =============================================================================
+# --- 3. FIGURAS ---
 def figura_roc(y: np.ndarray, curvas: dict[str, np.ndarray]) -> None:
     import matplotlib.pyplot as plt
     from sklearn.metrics import roc_auc_score, roc_curve

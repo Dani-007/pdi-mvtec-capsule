@@ -1,44 +1,10 @@
-"""
-Etapa 5 - Classificação a partir das fichas de atributos (dados/atributos.csv).
+"""Etapa 5: SVM e Random Forest sobre a ficha de atributos, em validação cruzada de 5 folds.
 
-Duas tarefas, em sequência (como numa linha de inspeção):
-    binaria   normal x defeituosa, nas 301 imagens do conjunto 'classificacao' (coluna 'rotulo')
-    defeitos  qual defeito: crack, faulty_imprint, poke, scratch, squeeze, só nas 109
-              defeituosas (coluna 'tipo', 5 classes)
+Tarefas: normal x defeituosa (301 imagens) e qual defeito (109 defeituosas). Padronização e
+hiperparâmetros só no treino de cada rodada. "Prioriza defeitos": limiar escolhido no treino
+para recall >= RECALL_ALVO.
 
-Comparações pedidas no enunciado:
-    - grupos de atributos: forma, textura, posicao_impressao e todos juntos;
-    - classificadores: SVM (núcleo RBF) e Random Forest.
-
-Protocolo (sem vazamento):
-    - validação cruzada com a coluna 'fold' da partição (5 rodadas: treina em 4 folds e testa
-      no 5º), então cada imagem é testada uma vez, por um modelo que não a viu;
-    - padronização (z-score) e escolha de hiperparâmetros feitas SÓ no treino de cada rodada
-      (busca em grade com validação cruzada interna de 3 partes);
-    - classes desbalanceadas: class_weight='balanced'.
-
-Ponto de operação da tarefa binária. O objetivo do projeto é ACHAR os defeitos (rejeitar uma
-boa é um erro menor que aprovar uma defeituosa). Por isso, além da decisão padrão do
-classificador, a binária é avaliada com um limiar que prioriza os defeitos: em cada rodada, o
-limiar sobre a pontuação "defeituosa" é escolhido SÓ no treino (previsões fora da amostra da
-validação interna) como o maior valor que ainda dá recall >= RECALL_ALVO nas defeituosas do
-treino. Depois ele é aplicado, sem mudança, às imagens de teste da rodada.
-
-Métricas: acurácia balanceada, precisão, recall e especificidade, F1 (binária: classe
-defeituosa; defeitos: média macro), ROC-AUC (binária), matriz de confusão e acerto por tipo.
-Referência do acaso: acurácia balanceada 0,50 (binária) e 0,20 (defeitos, 5 classes).
-
-Saídas em resultados/etapa5/:
-    tabela_binaria.csv|txt                            binária, decisão padrão
-    tabela_binaria_prioriza_defeitos.csv|txt          binária, limiar para recall >= RECALL_ALVO
-    encontradas_por_tipo.txt                          binária (prioriza defeitos), por tipo
-    tabela_defeitos.csv|txt                           qual defeito
-    acerto_por_tipo.txt                               acerto por tipo (tarefa defeitos)
-    matriz_confusao_*.png                             melhor configuração de cada tarefa
-    importancia_atributos.png                         Random Forest, todos os atributos
-    erros_binaria.csv, exemplos_erros.png             erros da binária (prioriza defeitos)
-
-Uso:  python src/classificacao.py      (exige dados/atributos.csv; ~2 min)
+Uso:  python src/classificacao.py   (~2 min) -> resultados/etapa5/
 """
 
 from __future__ import annotations
@@ -84,8 +50,8 @@ def carregar() -> list[dict]:
 
 
 def _pontuar(est, X: np.ndarray) -> np.ndarray:
-    """Pontuação de "quão defeituosa": probabilidade (Random Forest) ou distância à fronteira
-    de decisão (SVM)."""
+    """Pontuação de "quão defeituosa": probabilidade (Random Forest) ou distância à fronteira de
+    decisão (SVM)."""
     pos = list(est.classes_).index("defeituosa")
     if hasattr(est, "predict_proba"):
         return est.predict_proba(X)[:, pos]

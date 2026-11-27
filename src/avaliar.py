@@ -1,18 +1,6 @@
-"""
-Avaliação quantitativa sobre todo o test/ de capsule.
+"""Etapa 1: avaliação de bordas e golden template nas 132 imagens de test/.
 
-Gera as tabelas usadas para justificar os parâmetros de pipeline.py:
-    1. Quanto do GT sobrevive a cada erosão da ROI.
-    2. Bordas (Canny/Sobel) x tamanho da abertura: falsos positivos vs. detecção.
-    3. Golden template x limiar x abertura: Dice/precisão por tipo de defeito.
-
-Métricas:
-    hit      fração de imagens defeituosas com >= 30 px marcados dentro do GT
-    FP_boa   média de pixels marcados por imagem boa (todo pixel é falso positivo)
-    FP_def   média de pixels marcados FORA do GT nas imagens defeituosas
-    prec     precisão pixel a pixel global (soma TP / soma marcados) nas defeituosas
-
-Uso:  python src/avaliar.py   (~3 min; o golden template domina o tempo)
+Uso:  python src/avaliar.py   (~3 min)
 """
 
 import numpy as np

@@ -1,33 +1,11 @@
-"""
-Etapa 3 - Máscara final do defeito (golden template + morfologia completa).
+"""Etapa 3: máscara final do defeito (golden template + morfologia), medindo cada operação.
 
-Parte do golden template da Etapa 1 (pipeline.py), com o "500" e o logo realinhados
-localmente antes da subtração (impressao.diferenca_com_impressao; desligue com
-CORRIGIR_IMPRESSAO = False para reproduzir a versão sem esse tratamento), e acrescenta a
-limpeza morfológica, medindo o efeito de cada operação sobre os falsos positivos:
+    C0 limiar | C1 + abertura 5x5 | C2 + ROI erodida | C3 + fechamento 5x5
+    C4 + preenchimento de buracos (máscara final) | C5 + remoção de manchas < A_MIN
 
-    C0  |teste - ref| > T                            (só limiar, ROI = cápsula inteira)
-    C1  + abertura 5x5                               (= Etapa 1 do Daniel)
-    C2  + ROI erodida 9 px                           (tira o contorno da cápsula)
-    C3  + fechamento 5x5                             (junta pedaços do mesmo defeito)
-    C4  + preenchimento de buracos                   (manchas sólidas)
-    C5  + remoção de componentes com área < A_MIN    (tira manchas pequenas)
+T e A_MIN vêm só do conjunto 'calibracao'; a avaliação usa só 'classificacao'.
 
-Regras da partição (dados/particao.csv):
-    - referências do golden template: conjunto 'banco' (30 normais);
-    - T e A_MIN: calculados só com o conjunto 'calibracao' (20 normais);
-    - avaliação: conjunto 'classificacao' (192 normais + 109 defeituosas),
-      que nunca participa da escolha de parâmetros.
-
-Saídas:
-    resultados/etapa3/tabela_morfologia.txt|csv   efeito de cada operação
-    resultados/etapa3/tabela_por_tipo.txt|csv     máscara final por tipo de defeito
-    resultados/etapa3/efeito_morfologia.png       hit x boas com alarme por etapa
-    resultados/etapa3/exemplo_*.png               passo a passo em exemplos
-    dados/gerado/mascaras/<pasta>_<tipo>_<id>.png máscara final (C4), usada na Etapa 4
-    dados/gerado/cache_golden.npz                 diferenças já calculadas (cache)
-
-Uso:  python src/segmentacao.py          (~10 min na primeira vez; depois usa o cache)
+Uso:  python src/segmentacao.py   (~10 min na 1ª vez; depois usa o cache)
 """
 
 from __future__ import annotations
@@ -59,10 +37,7 @@ PERCENTIL_LIMIAR = 99   # T = percentil 99 da diferença entre cápsulas boas
 PERCENTIL_AREA = 95     # A_MIN = percentil 95 da maior mancha que sobra em cápsulas boas
 MIN_PX_HIT = 30         # mesmo critério de "defeito encontrado" da Etapa 1
 
-# Máscara levada para a Etapa 4. C5 é medida, mas NÃO é usada: em cápsulas boas, as
-# manchas falsas (impressão "500" deslocada) chegam a ser tão grandes quanto os
-# defeitos, e A_MIN calibrado nas boas apaga quase todos os defeitos (ver tabela).
-# A decisão "mancha falsa x defeito" fica para os atributos e o classificador.
+# Máscara usada na Etapa 4. C5 não: as manchas falsas das boas têm o tamanho dos defeitos.
 ETAPA_FINAL = "C4 +preenchimento"
 
 ETAPAS = ["C0 limiar", "C1 +abertura", "C2 +ROI erodida", "C3 +fechamento",
@@ -73,15 +48,9 @@ def _ee(k: int) -> np.ndarray:
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
 
 
-# =============================================================================
-# 1. DIFERENÇA DO GOLDEN TEMPLATE (com cache)
-# =============================================================================
+# --- 1. DIFERENÇA DO GOLDEN TEMPLATE (com cache) ---
 def calcular_diferencas(linhas: list[dict], banco: list[dict]) -> dict[str, dict]:
-    """Para cada imagem: |teste alinhado - referência mais parecida| e as ROIs.
-
-    Guarda em cache (dados/gerado/cache_golden.npz), porque a escolha da referência
-    alinha cada imagem às 30 do banco e é a parte lenta.
-    """
+    """Para cada imagem: |teste alinhado - referência mais parecida| e as ROIs."""
     cache = {}
     if CACHE.exists():
         with np.load(CACHE) as z:
@@ -112,12 +81,10 @@ def calcular_diferencas(linhas: list[dict], banco: list[dict]) -> dict[str, dict
     return saida
 
 
-# =============================================================================
-# 2. MORFOLOGIA
-# =============================================================================
+# --- 2. MORFOLOGIA ---
 def preencher_buracos(mascara: np.ndarray) -> np.ndarray:
-    """Preenche buracos internos: pinta o fundo a partir da borda (flood fill) e
-    tudo que não foi alcançado é buraco dentro de alguma mancha."""
+    """Preenche buracos internos: pinta o fundo a partir da borda (flood fill) e tudo que não foi
+    alcançado é buraco dentro de alguma mancha."""
     fundo = mascara.copy()
     h, w = mascara.shape
     borda = np.zeros((h + 2, w + 2), np.uint8)
@@ -151,13 +118,9 @@ def etapas_mascara(d: dict, limiar: int, area_min: int | None) -> dict[str, np.n
     return m
 
 
-# =============================================================================
-# 3. CALIBRAÇÃO (só cápsulas boas do conjunto 'calibracao')
-# =============================================================================
+# --- 3. CALIBRAÇÃO (só cápsulas boas do conjunto 'calibracao') ---
 def calibrar(dif_cal: dict[str, dict]) -> tuple[int, int]:
-    """T = percentil 99 da diferença dentro da cápsula; A_MIN = percentil 95 da
-    maior mancha que sobra em C4 em cada cápsula boa (ou seja, com A_MIN, ~95%
-    das cápsulas boas de calibração ficam sem nenhuma mancha)."""
+    """T = p99 da diferença entre boas; A_MIN = p95 da maior mancha que sobra em C4 nas boas."""
     amostras = np.concatenate([d["diff"][d["roi_cheia"] > 0] for d in dif_cal.values()])
     limiar = int(np.ceil(np.percentile(amostras, PERCENTIL_LIMIAR)))
     maiores = []
@@ -169,9 +132,7 @@ def calibrar(dif_cal: dict[str, dict]) -> tuple[int, int]:
     return limiar, area_min
 
 
-# =============================================================================
-# 4. AVALIAÇÃO (conjunto 'classificacao')
-# =============================================================================
+# --- 4. AVALIAÇÃO (conjunto 'classificacao') ---
 def avaliar(linhas: list[dict], dif: dict[str, dict], limiar: int, area_min: int):
     tipos = ["crack", "faulty_imprint", "poke", "scratch", "squeeze"]
     reg = {e: [] for e in ETAPAS}
